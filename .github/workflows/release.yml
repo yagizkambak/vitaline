@@ -1,0 +1,113 @@
+# Builds release packages and uploads them to GitHub Releases as a DRAFT.
+#
+# Trigger: push a tag starting with `v` (e.g. `git tag v0.2.0 && git push origin v0.2.0`)
+# or run it manually from the Actions tab.
+#
+# The output is left as a draft; download and try the packages before publishing
+# the release by hand. The Homebrew cask and winget manifest use the download
+# URLs of the published release, so this ordering matters.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# tauri-action creates the release and uploads the assets.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      # If one platform fails, still produce the other's package; it's easier
+      # to see what's missing and re-run just that platform.
+      fail-fast: false
+      matrix:
+        include:
+          # A single universal DMG covers both Apple Silicon and Intel.
+          # Building them separately would need on_arm/on_intel handling in
+          # the Homebrew cask; the app is a few MB, so the size cost of a
+          # universal binary doesn't matter.
+          - platform: macos-latest
+            target: universal-apple-darwin
+            args: "--target universal-apple-darwin"
+          # Windows: NSIS (.exe) and WiX (.msi). The winget manifest uses one
+          # of these.
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            # msi (WiX) is dropped: light.exe fails consistently on this
+            # runner image ("failed to run ...WixTools314\light.exe"),
+            # reproduced twice in a row, not a one-off flake. nsis alone
+            # is what winget/the release notes point users at anyway.
+            args: "--bundles nsis"
+
+    runs-on: ${{ matrix.platform }}
+    name: ${{ matrix.target }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # dtolnay/rust-toolchain is intentionally pinned to the `stable`
+      # channel rather than a SHA -- this action is designed to be used this
+      # way so the Rust version stays current (see the project README).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Universal builds need both targets. Installing both on Windows
+          # would be a wasted download, so this is platform-conditional.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: src-tauri
+          # Separate targets get separate caches.
+          key: ${{ matrix.target }}
+
+      - run: npm ci
+
+      # tauri build already runs `npm run build` (tsc --noEmit + vite build),
+      # but surfacing a type error here is faster than after packaging starts.
+      - run: npm run build
+
+      - uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v0.0.0-{0}', github.sha) }}
+          releaseName: Vitaline ${{ github.ref_name }}
+          releaseBody: |
+            ## Installation
+
+            **macOS** — the app is NOT signed, so Gatekeeper blocks it on first
+            launch. After opening the DMG and dragging the app over:
+
+            ```
+            xattr -cr "/Applications/Vitaline.app"
+            ```
+
+            Or via Homebrew:
+
+            ```
+            brew tap yagizkambak/tap
+            brew trust --cask yagizkambak/tap/vitaline
+            brew install --cask vitaline
+            ```
+
+            (Homebrew 6+ requires trusting third-party taps explicitly.
+            `--no-quarantine` was removed in Homebrew 4.7, so run the `xattr`
+            command above too if Gatekeeper still blocks it after install.)
+
+            **Windows** — installing the `.exe` (NSIS) is enough. Since it's
+            unsigned, you may see a SmartScreen warning: "More info" > "Run anyway".
+          releaseDraft: true
+          prerelease: false
+          # tauri.conf.build.json tightens the CSP for release builds (drops
+          # the dev-server connect-src entries that the base config carries
+          # for `tauri dev`'s HMR socket).
+          args: ${{ matrix.args }} --config src-tauri/tauri.conf.build.json

@@ -1,0 +1,61 @@
+[package]
+name = "vitaline"
+version = "0.1.0"
+description = "Shows GitLab/GitHub/Azure DevOps pipeline status as a notch at the top of the screen"
+authors = ["yagizkambak"]
+license = "MIT"
+repository = "https://github.com/yagizkambak/vitaline"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "vitaline_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-notification = "2"
+# Tray app: if a second copy is launched, bring the existing one to the
+# front and exit instead of starting a duplicate.
+tauri-plugin-single-instance = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# rustls + the OS's root certificates: no OpenSSL build headaches, and
+# still works if a self-hosted GitLab's corporate CA is trusted by the OS.
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls-native-roots",
+  "charset",
+  "http2",
+] }
+tokio = { version = "1", features = ["time", "sync", "macros"] }
+
+anyhow = "1"
+# For encoding the Azure DevOps PAT into a Basic auth header.
+base64 = "0.22"
+chrono = "0.4"
+urlencoding = "2"
+parking_lot = "0.12"
+opener = "0.7"
+# On Linux you'll also need to enable the "sync-secret-service" feature.
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Only needed to raise the notch window above the menu bar and position it
+# correctly (notch.rs). tao's set_position mixes up CGDisplay (Quartz,
+# pixel) and NSScreen (Cocoa, point) units, which pushes the window below
+# the menu bar on scaled resolutions; reading NSGeometry types directly
+# from Cocoa sidesteps that mismatch.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

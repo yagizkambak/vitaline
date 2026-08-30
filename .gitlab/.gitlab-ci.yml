@@ -1,0 +1,124 @@
+# GitLab.com mirror of .github/workflows/release.yml: builds the Windows and
+# macOS packages and publishes them as a GitLab Release.
+#
+# This file lives at .gitlab/.gitlab-ci.yml rather than the repo root, so the
+# project's "CI/CD configuration file" setting (Settings > CI/CD > General
+# pipelines) must be set to `.gitlab/.gitlab-ci.yml` for GitLab to find it.
+#
+# Trigger: push a tag starting with `v` (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
+#
+# Runner requirements (adjust the `tags:` below to match your actual runners):
+#   - build:windows needs a Windows runner. GitLab.com's shared Windows
+#     runners are tagged `saas-windows-medium-amd64` at the time of writing.
+#   - build:macos needs a macOS runner with Xcode. GitLab.com's shared macOS
+#     runners are tagged `saas-macos-medium-m1` and use an `image:` to pick
+#     the Xcode version (e.g. `macos-14-xcode-15`). Both are gated by plan
+#     tier -- confirm they're enabled for this project before relying on them.
+#
+# Release assets are uploaded to this project's generic package registry
+# first, then linked into the GitLab Release; `release-cli` itself can't
+# attach local files directly.
+
+stages:
+  - build
+  - release
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+variables:
+  PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/vitaline/${CI_COMMIT_TAG}"
+
+.rust_setup: &rust_setup
+  - rustup default stable
+
+build:windows:
+  stage: build
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    RUSTUP_HOME: "C:\\rustup"
+    CARGO_HOME: "C:\\cargo"
+  before_script:
+    # GitLab's shared Windows runners don't ship Rust or Node by default.
+    - Invoke-WebRequest -Uri "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" -OutFile rustup-init.exe
+    - .\rustup-init.exe -y --default-toolchain stable
+    - $env:Path = "$env:CARGO_HOME\bin;$env:Path"
+    - choco install nodejs-lts -y
+    - refreshenv
+  script:
+    # msi (WiX) is intentionally not built: light.exe failed consistently
+    # on the equivalent GitHub Actions Windows runner (reproduced twice in
+    # a row), so it's dropped here too rather than trusting it works on
+    # GitLab's shared Windows runner.
+    - npm ci
+    - npm run app:build -- --bundles nsis
+    - New-Item -ItemType Directory -Force -Path dist-assets
+    - Copy-Item src-tauri\target\release\bundle\nsis\*.exe dist-assets\
+    - |
+      Get-ChildItem dist-assets | ForEach-Object {
+        curl.exe --fail -H "JOB-TOKEN: $env:CI_JOB_TOKEN" --upload-file $_.FullName "$env:PACKAGE_REGISTRY_URL/$($_.Name)"
+      }
+  artifacts:
+    paths:
+      - dist-assets/
+    expire_in: 1 week
+
+build:macos:
+  stage: build
+  tags:
+    - saas-macos-medium-m1
+  image: macos-14-xcode-15
+  before_script:
+    - *rust_setup
+    - rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    - brew install node
+  script:
+    - npm ci
+    - npm run app:build -- --target universal-apple-darwin
+    - mkdir -p dist-assets
+    - cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg dist-assets/
+    - |
+      for f in dist-assets/*; do
+        name="$(basename "$f")"
+        curl --fail -H "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$f" "${PACKAGE_REGISTRY_URL}/${name}"
+      done
+  artifacts:
+    paths:
+      - dist-assets/
+    expire_in: 1 week
+
+release:
+  stage: release
+  needs:
+    - build:windows
+    - build:macos
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  tags:
+    - saas-linux-medium-amd64
+  script:
+    - echo "Creating release ${CI_COMMIT_TAG}"
+  release:
+    tag_name: "${CI_COMMIT_TAG}"
+    name: "Vitaline ${CI_COMMIT_TAG}"
+    description: |
+      ## Installation
+
+      **macOS** — the app is NOT signed, so Gatekeeper blocks it on first
+      launch. After opening the DMG and dragging the app over:
+
+      ```
+      xattr -cr "/Applications/Vitaline.app"
+      ```
+
+      **Windows** — installing the `.exe` (NSIS) is enough. Since it's
+      unsigned, you may see a SmartScreen warning: "More info" > "Run anyway".
+    assets:
+      links:
+        # File names must match what build:windows / build:macos actually
+        # produce; update if the app version or bundle naming changes.
+        - name: "Vitaline (Windows installer, .exe)"
+          url: "${PACKAGE_REGISTRY_URL}/Vitaline_${CI_COMMIT_TAG}_x64-setup.exe"
+        - name: "Vitaline (macOS, universal DMG)"
+          url: "${PACKAGE_REGISTRY_URL}/Vitaline_${CI_COMMIT_TAG}_universal.dmg"

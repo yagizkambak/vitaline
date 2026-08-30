@@ -1,0 +1,1417 @@
+:root {
+  --bg: #0b0d11;
+  --bg-soft: #14181f;
+  --line: #262c36;
+  --fg: #e6edf3;
+  --fg-dim: #9aa4b2;
+  --fg-faint: #6b7482;
+
+  --ok: #3fb950;
+  --bad: #f85149;
+  --busy: #58a6ff;
+  --warn: #d29922;
+  --idle: #7d8590;
+
+  --radius: 16px;
+
+  /**
+   * Open/close motion — the same feel as BoringNotch's SwiftUI springs.
+   *
+   * `cubic-bezier` CANNOT imitate a spring: by definition it stays within
+   * 0..1, i.e. it can't overshoot the target and settle back. That overshoot
+   * is the very thing that makes BoringNotch feel "alive". `linear()` can
+   * carry a real spring solution because we give it the curve as sampled points.
+   *
+   * The points were generated from a damped spring equation:
+   *   open  = spring(response 0.64, dampingFraction 0.75) -> 2.8% overshoot
+   *   close = spring(response 0.58, dampingFraction 1.0)  -> no overshoot
+   *
+   * BoringNotch's own values (0.42/0.8) felt too fast for us -- a fast
+   * transition reads as a "flicker". `response` is the spring's PERIOD:
+   * increasing it genuinely slows the motion down; just stretching the
+   * duration would leave a long, unnoticed tail instead.
+   * The window is kept a bit larger to make room for the overshoot
+   * (`SPRING_SLACK` in Notch.tsx), otherwise frames that exceed the target
+   * get clipped and the spring's effect is lost.
+   */
+  --grow-open: 720ms;
+  --grow-close: 600ms;
+  --spring-open: linear(
+    0,
+    0.0086,
+    0.0322,
+    0.0676,
+    0.112,
+    0.1631,
+    0.2187,
+    0.2771,
+    0.3367,
+    0.3965,
+    0.4553,
+    0.5123,
+    0.567,
+    0.6188,
+    0.6674,
+    0.7126,
+    0.7542,
+    0.7923,
+    0.8268,
+    0.8579,
+    0.8856,
+    0.9101,
+    0.9315,
+    0.9502,
+    0.9662,
+    0.9799,
+    0.9913,
+    1.0008,
+    1.0086,
+    1.0147,
+    1.0195,
+    1.0231,
+    1.0256,
+    1.0273,
+    1.0281,
+    1.0284,
+    1.0281,
+    1.0274,
+    1.0264,
+    1.0251,
+    1.0237,
+    1.0221,
+    1.0204,
+    1.0187,
+    1.017,
+    1.0154,
+    1.0137,
+    1.0122,
+    1.0107,
+    1.0094,
+    1.0081,
+    1.0069,
+    1
+  );
+  --spring-close: linear(
+    0,
+    0.0072,
+    0.0265,
+    0.055,
+    0.0902,
+    0.1302,
+    0.1734,
+    0.2184,
+    0.2642,
+    0.3101,
+    0.3554,
+    0.3995,
+    0.4422,
+    0.4831,
+    0.5221,
+    0.5591,
+    0.594,
+    0.6268,
+    0.6574,
+    0.6861,
+    0.7127,
+    0.7374,
+    0.7603,
+    0.7814,
+    0.8008,
+    0.8188,
+    0.8352,
+    0.8503,
+    0.8641,
+    0.8767,
+    0.8883,
+    0.8988,
+    0.9084,
+    0.9172,
+    0.9251,
+    0.9323,
+    0.9389,
+    0.9448,
+    0.9502,
+    0.9551,
+    0.9596,
+    0.9636,
+    0.9672,
+    0.9705,
+    0.9734,
+    0.9761,
+    0.9785,
+    0.9807,
+    0.9826,
+    0.9844,
+    0.986,
+    0.9874,
+    1
+  );
+  --mono:
+    ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas,
+    monospace;
+  --sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    Inter, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------------------------------------- notch --- */
+
+/* The notch window is transparent: only .panel draws a background. */
+.notch-body {
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid var(--line);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  height: var(--panel-h);
+  transition:
+    width var(--grow-close) var(--spring-close),
+    height var(--grow-close) var(--spring-close);
+}
+
+/**
+ * Notch-less path (Windows/Linux/external monitor): width was never defined
+ * here at all. `position: fixed` + `left: 0` + width:auto means
+ * "shrink-to-fit" in the browser -- the panel sizes itself to its own small
+ * content (dot+counter) no matter how much we grow the window from Rust, it
+ * just shifts LEFT along with the window (looking like it isn't growing).
+ * The fixed width of `.body` in the open state (below) hid this by
+ * accident; there was nothing to hide it in the collapsed pill.
+ *
+ * `width: 100%` ties the panel's width to the viewport, i.e. the WINDOW size
+ * given by Rust's `set_size`. The notched Mac path never hits this --
+ * `.panel--notched` overrides its own `width: calc(...)` below.
+ */
+.panel:not(.panel--notched) {
+  width: 100%;
+}
+
+/* Notched Mac: the panel aligns to the NOTCH, not the window. */
+.panel--notched {
+  /**
+   * `left: 50%` stays FIXED, the shift is left to `transform`.
+   *
+   * Since the window is always centered on screen, the window's 50% point
+   * equals the notch's exact center; even as the window grows and moves,
+   * this point stays in the SAME place ON SCREEN. If we put the shift on
+   * `left` instead, the percentage's reference would change along with the
+   * window and the value would jump mid-transition; `transform` is plain
+   * px, so it interpolates smoothly (and on the GPU too).
+   *
+   * Result: the gap in the middle always sits over the real notch, the ears
+   * can have different widths, and since both ears equalize while opening,
+   * the panel opens symmetrically from the notch's center outward.
+   */
+  left: 50%;
+  transform: translateX(calc(-1 * (var(--notch-w) / 2 + var(--left-ear))));
+  width: calc(var(--left-ear) + var(--notch-w) + var(--right-ear));
+  /* Base transition is the CLOSE curve; `.panel--open` kicks in while
+     opening and swaps it for the overshooting spring. Since the class
+     change happens in the same frame as the size change, the right curve
+     applies in each direction. */
+  transition:
+    transform var(--grow-close) var(--spring-close),
+    width var(--grow-close) var(--spring-close),
+    height var(--grow-close) var(--spring-close);
+
+  /* Flat black matching the notch instead of the glass effect, so it reads
+     as ONE PIECE with the notch; a translucent/blurred surface gives it away
+     immediately next to the notch. */
+  background: #000;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: none;
+  box-shadow: none;
+  /* Top corners aren't rounded: the top edge is the edge of the screen itself. */
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+/* Bring the shadow back while open, since the body extends into the middle of the screen. */
+.panel--notched.panel--open {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  transition:
+    transform var(--grow-open) var(--spring-open),
+    width var(--grow-open) var(--spring-open),
+    height var(--grow-open) var(--spring-open);
+}
+
+.panel--open .pill,
+.panel--ticker .pill {
+  transition: grid-template-columns var(--grow-open) var(--spring-open);
+}
+
+/* Use the "arriving" spring for the announcement ticker opening too. */
+.panel--notched.panel--ticker {
+  transition:
+    transform var(--grow-open) var(--spring-open),
+    width var(--grow-open) var(--spring-open),
+    height var(--grow-open) var(--spring-open);
+}
+
+/* Collapsed state: just the aggregate status. Stuck to the top edge to sit inside the real notch. */
+.pill {
+  /**
+   * Three columns: left ear | physical notch | right ear. The middle column
+   * is exactly the notch's real width and stays EMPTY -- there are no
+   * screen pixels there, nothing drawn shows up regardless. Since the panel
+   * itself is aligned to the notch (see `.panel--notched`), this column
+   * always lands exactly over the real notch. On notch-less screens the
+   * ears are 0 and the layout collapses to the center.
+   */
+  display: grid;
+  grid-template-columns:
+    var(--left-ear, 1fr)
+    var(--notch-w, 0px)
+    var(--right-ear, 1fr);
+  align-items: center;
+  /**
+   * The columns must animate with the SAME curve and duration as the panel.
+   *
+   * While the panel's `transform` flows smoothly, if the column widths
+   * jumped in a single frame, the content would jump once the two combine:
+   * the status dot used to fly ~200px to the right at the start of opening,
+   * then drift back. Advancing on the same curve keeps the left column's
+   * right edge (= panel left + left ear) fixed at every instant, so the dot
+   * never budges at the notch's edge; only the black around it grows.
+   */
+  transition: grid-template-columns var(--grow-close) var(--spring-close);
+  height: var(--pill-h, 34px);
+  cursor: pointer;
+}
+
+/* Content leans toward the notch: right-aligned in the left ear, left-aligned in the right ear. */
+.pill__left {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 10px 0 14px;
+  min-width: 0;
+}
+
+.pill__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 14px 0 10px;
+  min-width: 0;
+}
+
+/**
+ * Notch-less path (Windows/Linux/external monitor): the pill isn't
+ * physically embedded in a notch, it floats directly above the desktop.
+ * What makes the notched Mac's smallness read as "anchored" is the notch
+ * itself, which doesn't exist here -- the same smallness just got lost.
+ * We make the dot and counters a bit bigger. Doesn't touch the
+ * `.panel--notched` path.
+ */
+.panel:not(.panel--notched) .pill__left,
+.panel:not(.panel--notched) .pill__right {
+  gap: 12px;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+/**
+ * `.pill`'s 3-column grid (left ear | notch | right ear) makes sense when
+ * the ear is small, hugging the center; on a wide, notch-less pill the dot
+ * and counters stayed bunched up in the middle with empty space on both
+ * sides. Here we use plain flex + space-between instead of grid: the dot
+ * leans to the left edge, the counters to the right edge, and the empty
+ * `.pill__notch` in between (meaningless on Windows anyway) is hidden. The
+ * Mac's grid (`.panel--notched .pill`) never goes through this at all.
+ */
+.panel:not(.panel--notched) .pill {
+  display: flex;
+  justify-content: space-between;
+}
+
+.panel:not(.panel--notched) .pill__left {
+  justify-content: flex-start;
+}
+
+.panel:not(.panel--notched) .pill__right {
+  justify-content: flex-end;
+}
+
+.panel:not(.panel--notched) .pill__notch {
+  display: none;
+}
+
+.panel:not(.panel--notched) .pill__counts {
+  font-size: 14px;
+  gap: 13px;
+}
+
+.panel:not(.panel--notched) .dot--md {
+  width: 14px;
+  height: 14px;
+}
+
+/* The announcement ticker is bigger/more legible the same way. */
+.panel:not(.panel--notched) .ticker {
+  font-size: 13px;
+  padding: 0 18px;
+}
+
+.pill__counts {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.pill__counts b {
+  font-weight: 650;
+  animation: pop 260ms cubic-bezier(0.2, 0.8, 0.25, 1);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(1.6);
+    opacity: 0.3;
+  }
+}
+
+/**
+ * Scrolling announcement: a subtitle-like strip that opens BELOW the notch.
+ *
+ * Used to be shown in the pill's right ear, in place of the counters; that
+ * was a narrow strip next to the notch and long text wasn't readable. Now
+ * the panel grows downward for this strip (`TICKER_HEIGHT` in Notch.tsx).
+ */
+.ticker {
+  height: var(--ticker-h);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 550;
+  /* Soft fade at the edges */
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    black 8%,
+    black 92%,
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent,
+    black 8%,
+    black 92%,
+    transparent
+  );
+}
+
+.ticker__text {
+  white-space: nowrap;
+  /* Text enters from the right, exits fully to the left */
+  padding-left: 100%;
+  animation-name: marquee;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  will-change: transform;
+}
+
+@keyframes marquee {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* The pill flashes red three times when the overall status newly turns bad.
+   Duration matches FLASH_MS in Notch.tsx. */
+.pill--flash {
+  animation: pillFlash 1.3s ease;
+}
+
+@keyframes pillFlash {
+  0%,
+  100% {
+    background: transparent;
+  }
+  10%,
+  35%,
+  60% {
+    background: color-mix(in srgb, var(--bad) 35%, transparent);
+  }
+  22%,
+  47%,
+  80% {
+    background: transparent;
+  }
+}
+
+.pill__empty {
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+
+/* NOTE: there must NOT be a `margin-left: auto` here. Left over from the old
+   flex layout, it used to pull the status dot away from the notch and push
+   it to the far left of the panel once we switched to grid (the gap widened
+   as the panel grew). */
+.pill__pin {
+  color: var(--busy);
+  font-size: 10px;
+}
+
+.t-ok {
+  color: var(--ok);
+}
+.t-bad {
+  color: var(--bad);
+}
+.t-busy {
+  color: var(--busy);
+}
+.t-idle {
+  color: var(--idle);
+}
+
+/* Open state */
+/* The window's height is derived from this panel's measured height, so NEVER
+   put vh here: 70vh would create a self-shrinking feedback loop. Fixed px. */
+.body {
+  border-top: 1px solid var(--line);
+  max-height: 560px;
+  overflow-y: auto;
+  /**
+   * Width is FIXED: so the body doesn't reflow while the panel shrinks/grows.
+   * Re-laying out the card list every frame is the most expensive thing
+   * here; at a fixed width the body only clips, layout happens once.
+   */
+  width: var(--open-w);
+  animation: bodyIn var(--grow-open) var(--spring-open);
+  /* Firefox has no -webkit-scrollbar support; this is its equivalent. Has
+     no effect in the Chromium/WebKit webviews below, where the rules do the
+     real work. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* Default scrollbars (WebView2 on Windows especially) are a chunky, bright
+   OS-chrome track that clashes with a borderless dark panel -- macOS's
+   overlay scrollbar mostly hides this, Windows doesn't. Both WebView2 and
+   WKWebView are Chromium/WebKit under the hood, so -webkit-scrollbar works
+   on both; thin + transparent track + a line-colored thumb reads as part of
+   the panel instead of a system control bolted onto it. */
+.body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.body::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.body::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-faint);
+  background-clip: padding-box;
+}
+
+/* Closing: the window stays large while the animation plays (`closing` in
+   Notch.tsx). CLOSE_ANIM_MS must be longer than both this and `--grow-close`. */
+.body--out {
+  animation: bodyOut 380ms ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes bodyIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes bodyOut {
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+.body__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  z-index: 2;
+}
+
+/* The panel is already opaque black: there's nothing behind it to blur, but
+   `backdrop-filter` was making every frame more expensive during the animation. */
+.panel--notched .body__head {
+  background: #000;
+}
+
+.body__title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.body__when {
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.body__tools {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.banner {
+  margin: 10px 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.banner--bad {
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--line));
+  color: color-mix(in srgb, var(--bad) 75%, var(--fg));
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ----------------------------------------------------------------- dots --- */
+
+.dot {
+  display: inline-block;
+  border-radius: 50%;
+  flex: none;
+  position: relative;
+}
+
+.dot--md {
+  width: 10px;
+  height: 10px;
+}
+.dot--sm {
+  width: 7px;
+  height: 7px;
+}
+
+.dot--ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+}
+.dot--bad {
+  background: var(--bad);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 20%, transparent);
+}
+.dot--warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent);
+}
+.dot--idle {
+  background: var(--idle);
+}
+.dot--busy {
+  background: var(--busy);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+/* Thin arc spinning around the dot while running */
+.dot--busy::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  border-top-color: var(--busy);
+  animation: spin 900ms linear infinite;
+}
+
+.dot--sm.dot--busy::after {
+  inset: -3px;
+  border-width: 1px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--busy) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--busy) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    transition: none;
+  }
+  .body,
+  .body--out,
+  .card,
+  .card__jobs,
+  .trace,
+  .pill--flash,
+  .pill__counts b {
+    animation: none !important;
+  }
+  .dot--busy,
+  .dot--busy::after,
+  .stagebar__seg--busy {
+    animation: none;
+  }
+  /* With reduced motion, the scrolling text stays still and overflow is clipped. */
+  .ticker__text {
+    animation: none;
+    padding-left: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------- cards --- */
+
+.card {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  animation: cardIn 240ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
+}
+
+.cards .card:nth-child(2) {
+  animation-delay: 40ms;
+}
+.cards .card:nth-child(3) {
+  animation-delay: 80ms;
+}
+.cards .card:nth-child(n + 4) {
+  animation-delay: 110ms;
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+
+.card:last-child {
+  border-bottom: none;
+}
+
+.card.is-busy {
+  opacity: 0.6;
+}
+
+.card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.card__main {
+  min-width: 0;
+  flex: 1;
+}
+
+.card__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.card__branch {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+.card__sha {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+
+.card__sub {
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card__sub--error {
+  color: var(--bad);
+  white-space: normal;
+}
+
+.card__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.card__state {
+  font-weight: 600;
+}
+.card__state--ok {
+  color: var(--ok);
+}
+.card__state--bad {
+  color: var(--bad);
+}
+.card__state--busy {
+  color: var(--busy);
+}
+.card__state--warn {
+  color: var(--warn);
+}
+.card__state--idle {
+  color: var(--idle);
+}
+
+.card__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.card__err {
+  font-size: 11px;
+  color: var(--bad);
+}
+
+.card__jobs {
+  margin-top: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  animation: cardIn 180ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
+}
+
+/* ------------------------------------------------------------- stagebar --- */
+
+.stagebar {
+  display: flex;
+  gap: 3px;
+  margin-top: 9px;
+}
+
+.stagebar__seg {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  color: var(--fg);
+  background: var(--bg-soft);
+}
+
+.stagebar__seg.is-active {
+  outline: 1px solid var(--fg-dim);
+}
+
+.stagebar__seg--ok {
+  background: color-mix(in srgb, var(--ok) 20%, var(--bg-soft));
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+}
+.stagebar__seg--bad {
+  background: color-mix(in srgb, var(--bad) 22%, var(--bg-soft));
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+}
+.stagebar__seg--busy {
+  background-color: color-mix(in srgb, var(--busy) 22%, var(--bg-soft));
+  border-color: color-mix(in srgb, var(--busy) 45%, transparent);
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--busy) 30%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 180% 0;
+  }
+  to {
+    background-position: -80% 0;
+  }
+}
+.stagebar__seg--warn {
+  background: color-mix(in srgb, var(--warn) 20%, var(--bg-soft));
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.stagebar__seg--idle {
+  background: var(--bg-soft);
+  border-color: var(--line);
+  color: var(--fg-dim);
+}
+
+.stagebar__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stagebar__count {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------------------------------------------------------- jobs --- */
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.job:last-child {
+  border-bottom: none;
+}
+
+.job.is-busy {
+  opacity: 0.5;
+}
+
+.job__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.job__tag {
+  font-size: 10px;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/**
+ * Badge for the downstream pipeline a bridge (trigger) job kicked off.
+ *
+ * On GitLab, `/pipelines/:id/jobs` doesn't return bridge jobs, so
+ * downstream/child pipelines used to be completely invisible in the UI; now
+ * they come from the `/bridges` endpoint and show up in their own stage with
+ * this badge.
+ */
+.job__downstream {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--fg-dim);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  cursor: pointer;
+}
+
+.job__downstream:hover {
+  border-color: color-mix(in srgb, var(--busy) 50%, var(--line));
+  color: var(--fg);
+}
+
+.job__downstream-count {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The downstream pipeline's job list; opens indented below the parent job. */
+.job__children {
+  margin: 2px 0 6px 22px;
+  border-left: 1px solid var(--line);
+  padding-left: 10px;
+}
+
+.job__child-stage-name {
+  display: block;
+  font-size: 10px;
+  color: var(--fg-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 4px 0 2px;
+}
+
+/* Downstream jobs are read-only: no action buttons, and a bit dimmer. */
+.job--child {
+  opacity: 0.9;
+}
+
+.job__downstream-ref {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job__dur {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.job__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.job__error {
+  flex-basis: 100%;
+  color: var(--bad);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------- merge requests --- */
+
+.pill__mrs {
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mrs {
+  display: flex;
+  flex-direction: column;
+}
+
+.mr {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mr:last-child {
+  border-bottom: none;
+}
+
+.mr:hover {
+  background: var(--bg-soft);
+}
+
+.mr__iid {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+  flex: none;
+}
+
+.mr__draft {
+  flex: none;
+  font-size: 10px;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.mr__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mr__branch {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0 5px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mr__meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+button.has-badge b {
+  color: var(--busy);
+  font-weight: 650;
+}
+
+/* Action error: stays in the panel until it's read, the user dismisses it. */
+.banner--action {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.banner--action > span {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------- trace --- */
+
+.trace {
+  animation: cardIn 180ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
+  margin-top: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #05070a;
+}
+
+.trace__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.trace__stage {
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+
+.trace__close {
+  margin-left: auto;
+}
+
+.trace__body {
+  margin: 0;
+  padding: 10px;
+  max-height: 260px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* -------------------------------------------------------------- buttons --- */
+
+button {
+  font: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--fg-faint);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.danger:hover:not(:disabled) {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+button.primary {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  font-size: 13px;
+  padding: 6px 16px;
+}
+
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linkish:hover {
+  text-decoration: underline;
+}
+
+/* ------------------------------------------------------------- settings --- */
+
+.settings-body {
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+.settings {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 28px 48px;
+  font-size: 13px;
+}
+
+.settings h1 {
+  font-size: 18px;
+  margin: 0 0 20px;
+}
+
+.settings h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-faint);
+  margin: 0 0 12px;
+}
+
+.settings section {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: var(--bg-soft);
+}
+
+.settings label {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.settings label > span {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.settings label.inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings label.inline > span {
+  margin: 0;
+  flex: none;
+}
+
+.settings label.inline input {
+  width: 100px;
+}
+
+.settings label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.settings label.check > span {
+  margin: 0;
+  font-weight: 400;
+}
+
+.settings input[type="text"],
+.settings input[type="url"],
+.settings input[type="password"],
+.settings input[type="number"],
+.settings input:not([type]) {
+  width: 100%;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+
+.settings select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 6px;
+}
+
+.settings input:focus {
+  outline: 2px solid #1f6feb;
+  outline-offset: -1px;
+}
+
+.settings small,
+.settings .hint {
+  display: block;
+  margin-top: 5px;
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.settings code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.settings .row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings .row--footer {
+  margin-top: 4px;
+}
+
+.settings .ok {
+  color: var(--ok);
+}
+.settings .err {
+  color: var(--bad);
+}
+
+.projects {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.projects th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  padding: 0 6px 6px 0;
+}
+
+.projects td {
+  padding: 0 6px 6px 0;
+  vertical-align: top;
+}
+
+.projects td:last-child,
+.projects th:last-child {
+  width: 1%;
+  padding-right: 0;
+}
+
+.projects__actions {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.icon-btn {
+  padding: 3px 7px;
+  font-family: var(--mono);
+}

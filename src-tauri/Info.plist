@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Menu bar / notch app: no Dock icon or app menu should show up.
+       This only applies to the packaged .app; the Dock icon still shows up
+       during `tauri dev`. -->
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
