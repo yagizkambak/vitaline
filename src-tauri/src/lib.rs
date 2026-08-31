@@ -89,6 +89,9 @@ pub fn run() {
                     notch::INITIAL_WIDTH,
                     notch::INITIAL_HEIGHT,
                     top_offset,
+                    // The panel rect isn't known until the frontend renders;
+                    // the window is the pill's exact size at this point anyway.
+                    None,
                 );
                 // On macOS, calling show() directly here has always worked
                 // fine, so it's left as-is. On Windows the SAME call runs

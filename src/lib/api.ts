@@ -56,8 +56,22 @@ export const jobTrace = (
   jobId: number,
 ) => invoke<string>("job_trace", { projectId, pipelineId, jobId });
 
-export const setNotchSize = (width: number, height: number) =>
-  invoke<void>("set_notch_size", { width, height });
+/**
+ * The panel's visible rectangle inside the window, in CSS px relative to the
+ * window's top-left. The window is intentionally larger than the panel (spring
+ * slack + lagging shrink); Rust's cursor watcher needs the panel, not the frame.
+ */
+export interface HoverRect {
+  left: number;
+  width: number;
+  height: number;
+}
+
+export const setNotchSize = (
+  width: number,
+  height: number,
+  hover?: HoverRect,
+) => invoke<void>("set_notch_size", { width, height, hover });
 export const setNotchVisible = (visible: boolean) =>
   invoke<void>("set_notch_visible", { visible });
 
