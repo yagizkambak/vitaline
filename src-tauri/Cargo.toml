@@ -1,6 +1,6 @@
 [package]
 name = "vitaline"
-version = "0.1.0"
+version = "0.1.1"
 description = "Shows GitLab/GitHub/Azure DevOps pipeline status as a notch at the top of the screen"
 authors = ["yagizkambak"]
 license = "MIT"

@@ -1,7 +1,7 @@
 {
   "name": "vitaline",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Shows GitLab/GitHub/Azure DevOps pipeline status as a notch HUD at the top of the screen (Windows + macOS)",
   "license": "MIT",
