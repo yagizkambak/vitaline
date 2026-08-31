@@ -43,8 +43,26 @@ const PLAIN_PILL_HEIGHT = 40;
  * on the left, counters on the right. Making them equal left the left side
  * empty and needlessly long.
  */
-const LEFT_EAR = 34;
-const RIGHT_EAR = 78;
+/**
+ * Collapsed, the pill's content all sits to the LEFT of the notch -- the strip
+ * to the right belongs to macOS's own menu bar extras, and anything drawn
+ * there lands on top of them. See `.pill__group` in styles.css.
+ *
+ * Not quite 0: this sliver carries no content, it only keeps a few points of
+ * hover target on the notch's right side so approaching from that direction
+ * still opens the panel. Small enough to read as part of the notch's own edge
+ * rather than as a tab hanging off it.
+ */
+const COLLAPSED_RIGHT_EAR = 6;
+/**
+ * MINIMUM width of the left ear. Its real width is MEASURED from the content
+ * (see `groupWidth`), because that content is variable length: the status
+ * dot, one tone group per status, and the merge-request badge. Pinned to a
+ * constant it fit three single digits and clipped everything past that.
+ */
+const EAR_MIN = 78;
+/** The left ear's own padding: 10 toward the notch + 14 outward (styles.css). */
+const EAR_PADDING = 24;
 const EXPANDED_WIDTH = 700;
 /**
  * How far the opening spring overshoots its target. If the window were
@@ -174,6 +192,18 @@ export function Notch() {
    */
   const bodyRef = useRef<HTMLDivElement>(null);
   const [bodyHeight, setBodyHeight] = useState(0);
+  /**
+   * The pill content's NATURAL width (dot + counters), which sets the left
+   * ear's width.
+   *
+   * Measurable only because `.pill__inner` is `flex: 0 0 auto` (styles.css):
+   * it keeps its full width and overflows the ear rather than being squeezed
+   * into it, so what we read here is what it actually NEEDS, not what it
+   * currently has. No feedback loop -- the content's width doesn't depend on
+   * the ear's, so this settles after one pass.
+   */
+  const groupRef = useRef<HTMLSpanElement>(null);
+  const [groupWidth, setGroupWidth] = useState(0);
   const closeTimer = useRef<number | null>(null);
   const prevTone = useRef<string>("idle");
 
@@ -206,8 +236,10 @@ export function Notch() {
   const tickerEar = (TICKER_WIDTH - notchWidth) / 2;
   const ear = (collapsed: number) =>
     !notched ? 0 : expanded ? openEar : showTicker ? tickerEar : collapsed;
-  const leftEar = ear(LEFT_EAR);
-  const rightEar = ear(RIGHT_EAR);
+  // Notched and collapsed: the whole pill is left of the notch, nothing to
+  // the right of it. See `.pill__group` in styles.css for why.
+  const leftEar = ear(Math.max(EAR_MIN, groupWidth + EAR_PADDING));
+  const rightEar = ear(COLLAPSED_RIGHT_EAR);
 
   /**
    * The window is always centered on screen (see notch::place); the panel is
@@ -230,6 +262,17 @@ export function Notch() {
         // on the Mac path here too, without touching its own calc (tickerEar).
         ? TICKER_WIDTH
         : PLAIN_COLLAPSED_WIDTH;
+
+  useEffect(() => {
+    const el = groupRef.current;
+    if (!el) return;
+    const measure = () =>
+      setGroupWidth(Math.ceil(el.getBoundingClientRect().width));
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    measure();
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -424,60 +467,66 @@ export function Notch() {
         title={pinned ? "Click to release" : "Click to keep open"}
         onClick={() => setPinned((v) => !v)}
       >
-        {/* Left ear: the real pixels to the left of the notch. */}
-        <span className="pill__left">
-          <StatusDot status={overall} />
-          {pinned && (
-            <span className="pill__pin" title="Pinned">
-              {"◉"}
+        {/* Notched: the dot and the counters share the single ear left of
+            the notch, inside `.pill__inner` (the measured box). Notch-less:
+            both wrappers are `display: contents`, so these two become direct
+            children of `.pill` again and spread to its edges as before. */}
+        <span className="pill__group">
+          <span ref={groupRef} className="pill__inner">
+            <span className="pill__status">
+              <StatusDot status={overall} />
+              {pinned && (
+                <span className="pill__pin" title="Pinned">
+                  {"\u25c9"}
+                </span>
+              )}
             </span>
-          )}
+
+            <span className="pill__meta">
+              <span className="pill__counts">
+                {counts.total === 0 ? (
+                  <span className="pill__empty">no projects</span>
+                ) : (
+                  <>
+                    {/* key=value: the element remounts when the count changes and plays the pop animation */}
+                    {counts.ok > 0 && (
+                      <b key={`ok-${counts.ok}`} className="t-ok">
+                        {counts.ok}
+                      </b>
+                    )}
+                    {counts.busy > 0 && (
+                      <b key={`busy-${counts.busy}`} className="t-busy">
+                        {counts.busy}
+                      </b>
+                    )}
+                    {counts.bad > 0 && (
+                      <b key={`bad-${counts.bad}`} className="t-bad">
+                        {counts.bad}
+                      </b>
+                    )}
+                    {counts.other > 0 && (
+                      <b key={`idle-${counts.other}`} className="t-idle">
+                        {counts.other}
+                      </b>
+                    )}
+                    {counts.mrs > 0 && (
+                      <span
+                        key={`mrs-${counts.mrs}`}
+                        className="pill__mrs"
+                        title={`${counts.mrs} open merge request(s)`}
+                      >
+                        {"\u21c4"} {counts.mrs}
+                      </span>
+                    )}
+                  </>
+                )}
+              </span>
+            </span>
+          </span>
         </span>
 
         {/* The physical notch itself: no pixels here, left empty. */}
         <span className="pill__notch" aria-hidden="true" />
-
-        {/* Right ear: counters and the scrolling announcement. */}
-        <span className="pill__right">
-            <span className="pill__counts">
-              {counts.total === 0 ? (
-                <span className="pill__empty">no projects</span>
-              ) : (
-                <>
-                  {/* key=value: the element remounts when the count changes and plays the pop animation */}
-                  {counts.ok > 0 && (
-                    <b key={`ok-${counts.ok}`} className="t-ok">
-                      {counts.ok}
-                    </b>
-                  )}
-                  {counts.busy > 0 && (
-                    <b key={`busy-${counts.busy}`} className="t-busy">
-                      {counts.busy}
-                    </b>
-                  )}
-                  {counts.bad > 0 && (
-                    <b key={`bad-${counts.bad}`} className="t-bad">
-                      {counts.bad}
-                    </b>
-                  )}
-                  {counts.other > 0 && (
-                    <b key={`idle-${counts.other}`} className="t-idle">
-                      {counts.other}
-                    </b>
-                  )}
-                  {counts.mrs > 0 && (
-                    <span
-                      key={`mrs-${counts.mrs}`}
-                      className="pill__mrs"
-                      title={`${counts.mrs} open merge request(s)`}
-                    >
-                      {"⇄"} {counts.mrs}
-                    </span>
-                  )}
-                </>
-              )}
-            </span>
-        </span>
       </div>
 
       {/* Announcement ticker: a subtitle-like strip that opens BELOW the

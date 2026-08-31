@@ -323,23 +323,65 @@ body {
   cursor: pointer;
 }
 
-/* Content leans toward the notch: right-aligned in the left ear, left-aligned in the right ear. */
-.pill__left {
+/**
+ * The two content groups. Which SIDE of the notch each one lands on is decided
+ * below, per layout -- these rules only cover what they have in common.
+ */
+.pill__status,
+.pill__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/**
+ * Notched: EVERYTHING lives to the left of the notch. The right ear is empty.
+ *
+ * The strip to the right of the notch is where macOS keeps its own menu bar
+ * extras, and anything we draw there lands on top of them. The space to the
+ * LEFT is the free one: the app menus start at the far left and, for most
+ * apps, stop well short of the notch. So the whole group -- dot and counters
+ * -- goes there and the right ear collapses to 0.
+ *
+ * The group hugs the notch (`flex-end`), so growth extends LEFTWARD into that
+ * free space and the side nearest the notch stays put.
+ */
+.panel--notched .pill__group {
+  grid-column: 1;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
   padding: 0 10px 0 14px;
   min-width: 0;
 }
 
-.pill__right {
+/**
+ * The measured element (see `groupWidth` in Notch.tsx), which is why it's a
+ * separate box from `.pill__group`: the group is a grid item and therefore
+ * pinned to the ear's width, so measuring IT would only ever report the width
+ * it already has. This one is `flex: 0 0 auto` inside it, keeps its natural
+ * width, and the ear is then sized to fit.
+ */
+.panel--notched .pill__inner {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 0 14px 0 10px;
-  min-width: 0;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.panel--notched .pill__notch {
+  grid-column: 2;
+}
+
+/**
+ * Collapsed with an empty right ear, the panel's right edge IS the notch's
+ * right edge -- a rounded bottom-right corner would bite a curve out of the
+ * notch's own edge. The open and ticker states have real ears on both sides,
+ * so they keep it.
+ */
+.panel--notched.panel--pill:not(.panel--ticker) {
+  border-radius: 0 0 0 var(--radius);
 }
 
 /**
@@ -350,8 +392,8 @@ body {
  * We make the dot and counters a bit bigger. Doesn't touch the
  * `.panel--notched` path.
  */
-.panel:not(.panel--notched) .pill__left,
-.panel:not(.panel--notched) .pill__right {
+.panel:not(.panel--notched) .pill__status,
+.panel:not(.panel--notched) .pill__meta {
   gap: 12px;
   padding-left: 18px;
   padding-right: 18px;
@@ -371,11 +413,23 @@ body {
   justify-content: space-between;
 }
 
-.panel:not(.panel--notched) .pill__left {
+/**
+ * Notch-less: both wrappers vanish with `display: contents`, so the dot and
+ * the counters become direct flex children of `.pill` again and the original
+ * space-between layout applies untouched. There's no notch to dodge here, and
+ * no menu bar extras to collide with.
+ */
+.panel:not(.panel--notched) .pill__group,
+.panel:not(.panel--notched) .pill__inner {
+  display: contents;
+}
+
+/* Notch-less: source order, dot at the left edge, counters at the right. */
+.panel:not(.panel--notched) .pill__status {
   justify-content: flex-start;
 }
 
-.panel:not(.panel--notched) .pill__right {
+.panel:not(.panel--notched) .pill__meta {
   justify-content: flex-end;
 }
 
@@ -403,6 +457,14 @@ body {
   display: flex;
   align-items: baseline;
   gap: 10px;
+  /**
+   * NEVER shrink. The right ear is measured from this element (see
+   * `countsWidth` in Notch.tsx) and the ear is then sized to fit it; if this
+   * were allowed to shrink into the ear it currently has, the measurement
+   * would just report the squeezed width and the ear could never grow.
+   * Overflowing for a frame is fine -- the ear catches up on the next one.
+   */
+  flex: 0 0 auto;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
