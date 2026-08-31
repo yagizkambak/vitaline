@@ -251,7 +251,27 @@ export function Notch() {
   const windowWidth = useLaggingShrink(targetWindowWidth, CLOSE_ANIM_MS);
   const windowHeight = useLaggingShrink(targetWindowHeight, CLOSE_ANIM_MS);
 
-  useNotchAutosize(windowWidth, windowHeight);
+  /**
+   * The panel's VISIBLE rectangle inside the window -- the hover target.
+   *
+   * The window is deliberately bigger than the panel (SPRING_SLACK on every
+   * side, plus it stays large for the whole closing animation) and all of
+   * that excess is transparent. Rust used to take the window frame as the
+   * hover zone, so the panel opened while the cursor was still well below
+   * the notch, over empty desktop. See `notch::HoverRect`.
+   *
+   * Notched: the panel is aligned to the NOTCH, not the window -- `left: 50%`
+   * of the window, shifted left by `notchWidth / 2 + leftEar` (styles.css,
+   * `.panel--notched`). Notch-less: the panel is `width: 100%` at `left: 0`.
+   */
+  const panelWidth = notched ? leftEar + notchWidth + rightEar : windowWidth;
+  const panelLeft = notched ? windowWidth / 2 - (notchWidth / 2 + leftEar) : 0;
+
+  useNotchAutosize(windowWidth, windowHeight, {
+    left: panelLeft,
+    width: panelWidth,
+    height: panelHeight,
+  });
 
   // Re-read the notch dimensions when the screen changes too (an external monitor got plugged in).
   useEffect(() => {

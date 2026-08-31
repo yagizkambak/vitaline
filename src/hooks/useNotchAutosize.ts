@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { setNotchSize } from "../lib/api";
+import { setNotchSize, type HoverRect } from "../lib/api";
 
 /**
  * Resizes the window to the given TARGET size.
@@ -14,11 +14,22 @@ import { setNotchSize } from "../lib/api";
  * animation: the window jumps to its final size once, and the visible growth
  * happens entirely in CSS. The window's excess is transparent, so it's invisible.
  */
-export function useNotchAutosize(width: number, height: number) {
+export function useNotchAutosize(
+  width: number,
+  height: number,
+  hover: HoverRect,
+) {
+  const { left, width: hoverWidth, height: hoverHeight } = hover;
   useEffect(() => {
     if (width <= 0 || height <= 0) return;
-    void setNotchSize(Math.round(width), Math.round(height)).catch(() => {
+    void setNotchSize(Math.round(width), Math.round(height), {
+      left: Math.round(left),
+      width: Math.round(hoverWidth),
+      height: Math.round(hoverHeight),
+    }).catch(() => {
       // The window may be closing; this gets retried on the next measurement.
     });
-  }, [width, height]);
+    // `hover` is rebuilt on every render, so we depend on its FIELDS -- an
+    // object identity dep would fire an IPC call per render.
+  }, [width, height, left, hoverWidth, hoverHeight]);
 }

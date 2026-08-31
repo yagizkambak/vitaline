@@ -34,6 +34,27 @@ pub fn window(app: &AppHandle) -> Option<WebviewWindow> {
 #[cfg(target_os = "macos")]
 static HOT_ZONE: parking_lot::Mutex<Option<(f64, f64, f64, f64)>> = parking_lot::Mutex::new(None);
 
+/// The panel's VISIBLE rectangle inside the window, in logical points
+/// relative to the window's TOP-LEFT corner.
+///
+/// The window is deliberately bigger than the panel: it carries `SPRING_SLACK`
+/// on every side so the opening spring's overshoot doesn't clip, and it stays
+/// large for the whole closing animation (`useLaggingShrink`). None of that
+/// excess is painted -- it's transparent. So the hover zone has to be derived
+/// from the panel, not from the window frame; using the frame made the panel
+/// open while the cursor was still tens of points BELOW the notch.
+///
+/// The panel's top edge is always the window's top edge (`.panel { top: 0 }`),
+/// so there's no `top` field.
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HoverRect {
+    /// Distance from the window's left edge to the panel's left edge.
+    pub left: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// Watches the cursor and emits `HOVER_EVENT` when it enters the notch.
 ///
 /// WHY THIS IS NEEDED: the panel's `onMouseEnter` relies on WKWebView's
@@ -115,14 +136,33 @@ pub fn watch_cursor(app: AppHandle) {
 /// exact center. The panel's own alignment (asymmetric ears, expand
 /// animation) is done in CSS relative to this fixed center -- so there's only
 /// ever one thing moving during the animation.
-pub fn place(window: &WebviewWindow, width: u32, height: u32, top_offset: i32) {
+///
+/// `hover` is the panel's visible rectangle inside the window; it defines the
+/// cursor watcher's target zone on macOS. `None` means "the whole window",
+/// which is only right before the frontend has reported a real panel size.
+pub fn place(
+    window: &WebviewWindow,
+    width: u32,
+    height: u32,
+    top_offset: i32,
+    hover: Option<HoverRect>,
+) {
     // On macOS, size and position are given together in a SINGLE `setFrame:`
     // call; see `place_macos`. A separate `set_size` call causes a race there.
     #[cfg(target_os = "macos")]
     {
-        place_macos(window, width as f64, height as f64, top_offset as f64);
+        place_macos(
+            window,
+            width as f64,
+            height as f64,
+            top_offset as f64,
+            hover,
+        );
         return;
     }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = hover;
 
     #[cfg(not(target_os = "macos"))]
     {
@@ -179,7 +219,13 @@ pub fn place(window: &WebviewWindow, width: u32, height: u32, top_offset: i32) {
 ///
 /// NOTE: since the window is borderless, the frame size equals the content size.
 #[cfg(target_os = "macos")]
-fn place_macos(window: &WebviewWindow, width: f64, height: f64, top_offset: f64) {
+fn place_macos(
+    window: &WebviewWindow,
+    width: f64,
+    height: f64,
+    top_offset: f64,
+    hover: Option<HoverRect>,
+) {
     let main_thread_window = window.clone();
     let _ = window.run_on_main_thread(move || {
         use objc2::runtime::AnyObject;
@@ -237,14 +283,30 @@ fn place_macos(window: &WebviewWindow, width: f64, height: f64, top_offset: f64)
             // to Quartz orientation: primary screen's top-left is (0,0), y
             // increases downward.
             //
+            // The zone tracks the PANEL, not the window: the window carries
+            // transparent slack on every side (see `HoverRect`), and hovering
+            // empty air used to open the panel.
+            //
             // We extend it downward by HOVER_SKIRT. The notch itself is a
             // physical hole: the cursor can never enter it FROM ABOVE, it
-            // always approaches from below. Without this skirt, targeting the
-            // notch is nearly impossible. pipeline-island does the same thing
-            // (`interactiveHeight = notchHeight + 20`).
-            const HOVER_SKIRT: f64 = 20.0;
+            // always approaches from below, and it's invisible while it's
+            // behind the notch. Without this skirt, targeting the notch is
+            // nearly impossible. It's kept small on purpose -- every point
+            // here is a point of screen where the panel opens without the
+            // cursor having reached the notch.
+            const HOVER_SKIRT: f64 = 8.0;
+            let panel = hover.unwrap_or(HoverRect {
+                left: 0.0,
+                width,
+                height,
+            });
             let top_down_y = screen_frame.size.height - (y + height);
-            *HOT_ZONE.lock() = Some((x, top_down_y, width, height + HOVER_SKIRT));
+            *HOT_ZONE.lock() = Some((
+                x + panel.left,
+                top_down_y,
+                panel.width,
+                panel.height + HOVER_SKIRT,
+            ));
 
             // Did it actually land where we wanted? If the constraint comes
             // back (e.g. an AppKit update), log it -- this should never fire.
@@ -608,7 +670,7 @@ pub fn reveal(app: &AppHandle) {
     // We don't know its size from before it was hidden; once the frontend
     // mounts it'll report the real size via `set_notch_size` anyway, this is
     // only the first frame.
-    place(&window, INITIAL_WIDTH, INITIAL_HEIGHT, top_offset);
+    place(&window, INITIAL_WIDTH, INITIAL_HEIGHT, top_offset, None);
 }
 
 /// Window behaviors applied on every startup and settings change.

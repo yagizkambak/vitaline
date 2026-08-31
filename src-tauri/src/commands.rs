@@ -66,11 +66,14 @@ pub async fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig,
         let size = window.inner_size().ok();
         let scale = window.scale_factor().unwrap_or(1.0);
         if let Some(size) = size {
+            // Only the top offset changed here; the frontend re-reports the
+            // panel rect on its next render, so the hover zone stays as it was.
             notch::place(
                 &window,
                 (size.width as f64 / scale).round() as u32,
                 (size.height as f64 / scale).round() as u32,
                 clean.top_offset,
+                None,
             );
         }
     }
@@ -258,12 +261,17 @@ pub async fn job_trace(
 // ------------------------------------------------------------------ window --
 
 #[tauri::command]
-pub fn set_notch_size(app: AppHandle, width: u32, height: u32) -> Result<(), String> {
+pub fn set_notch_size(
+    app: AppHandle,
+    width: u32,
+    height: u32,
+    hover: Option<notch::HoverRect>,
+) -> Result<(), String> {
     let Some(window) = notch::window(&app) else {
         return Ok(());
     };
     let top_offset = app.state::<AppState>().config.read().top_offset;
-    notch::place(&window, width.max(1), height.max(1), top_offset);
+    notch::place(&window, width.max(1), height.max(1), top_offset, hover);
 
     // Windows/Linux only: macOS already calls show() directly in setup().
     // First size report: the frontend being able to call this IPC is proof
