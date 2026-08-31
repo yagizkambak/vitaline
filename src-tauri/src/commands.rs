@@ -63,19 +63,10 @@ pub async fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig,
     // Window behavior depends on the settings; apply it right away.
     if let Some(window) = notch::window(&app) {
         notch::apply_behaviour(&window, clean.show_on_all_spaces);
-        let size = window.inner_size().ok();
-        let scale = window.scale_factor().unwrap_or(1.0);
-        if let Some(size) = size {
-            // Only the top offset changed here; the frontend re-reports the
-            // panel rect on its next render, so the hover zone stays as it was.
-            notch::place(
-                &window,
-                (size.width as f64 / scale).round() as u32,
-                (size.height as f64 / scale).round() as u32,
-                clean.top_offset,
-                None,
-            );
-        }
+        // Only the top offset can have changed here, so we re-place at the
+        // size the frontend last reported. Reading it back off the window
+        // instead would lose the panel rect -- and with it the hover zone.
+        notch::replace(&window, clean.top_offset);
     }
 
     app.state::<AppState>().wake();
