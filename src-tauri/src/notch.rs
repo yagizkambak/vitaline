@@ -55,6 +55,20 @@ pub struct HoverRect {
     pub height: f64,
 }
 
+/// The last geometry the FRONTEND reported: logical (width, height) plus the
+/// panel rect inside it.
+///
+/// `reveal` and the settings path have to re-place the window without being
+/// able to ask anyone what should currently be on screen. They used to fall
+/// back to `INITIAL_*`, which CLOBBERED the real pill: after Hide -> Show the
+/// window came back 268x34, so the ears were clipped off and the hover zone
+/// was the startup placeholder. The notch sat there dead until something else
+/// happened to resize it -- which is exactly what a second click on the tray
+/// item did (the window is visible by then, so `toggle_notch` pins the panel
+/// open instead of revealing it, and THAT re-reports the real size).
+static LAST_GEOMETRY: parking_lot::Mutex<Option<(u32, u32, HoverRect)>> =
+    parking_lot::Mutex::new(None);
+
 /// Watches the cursor and emits `HOVER_EVENT` when it enters the notch.
 ///
 /// WHY THIS IS NEEDED: the panel's `onMouseEnter` relies on WKWebView's
@@ -147,6 +161,12 @@ pub fn place(
     top_offset: i32,
     hover: Option<HoverRect>,
 ) {
+    // Only a report that carries a panel rect comes from the frontend, and
+    // only those describe a real on-screen state worth replaying later.
+    if let Some(hover) = hover {
+        *LAST_GEOMETRY.lock() = Some((width, height, hover));
+    }
+
     // On macOS, size and position are given together in a SINGLE `setFrame:`
     // call; see `place_macos`. A separate `set_size` call causes a race there.
     #[cfg(target_os = "macos")]
@@ -190,6 +210,25 @@ pub fn place(
         let y = origin.y + (top_offset as f64 * scale).round() as i32;
 
         let _ = window.set_position(PhysicalPosition::new(x, y));
+    }
+}
+
+/// Re-applies the last geometry the frontend reported.
+///
+/// For callers that need to re-place the window (revealing it, a changed top
+/// offset) but have no business changing its SIZE. Falls back to the startup
+/// pill only if the frontend has never reported -- i.e. only before its first
+/// render, where that placeholder is in fact correct.
+pub fn replace(window: &WebviewWindow, top_offset: i32) {
+    // Copy the value out into its OWN statement first. Matching on
+    // `*LAST_GEOMETRY.lock()` directly keeps the guard alive across the whole
+    // match -- arms included -- and `place` locks the same mutex, so a
+    // parking_lot (non-reentrant) lock deadlocks the caller. It froze the app
+    // on Hide -> Show.
+    let last = *LAST_GEOMETRY.lock();
+    match last {
+        Some((width, height, hover)) => place(window, width, height, top_offset, Some(hover)),
+        None => place(window, INITIAL_WIDTH, INITIAL_HEIGHT, top_offset, None),
     }
 }
 
@@ -667,10 +706,11 @@ pub fn reveal(app: &AppHandle) {
     let _ = window.show();
     apply_behaviour(&window, show_on_all_spaces);
 
-    // We don't know its size from before it was hidden; once the frontend
-    // mounts it'll report the real size via `set_notch_size` anyway, this is
-    // only the first frame.
-    place(&window, INITIAL_WIDTH, INITIAL_HEIGHT, top_offset, None);
+    // Restore the size it had before it was hidden. Hiding does NOT unmount
+    // the webview, so the frontend has no reason to re-report anything on the
+    // way back -- its own state didn't change. Placing the startup pill here
+    // was therefore permanent, not "only the first frame".
+    replace(&window, top_offset);
 }
 
 /// Window behaviors applied on every startup and settings change.
