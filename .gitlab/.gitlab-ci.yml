@@ -1,31 +1,43 @@
-# GitLab.com mirror of .github/workflows/release.yml: builds the Windows and
-# macOS packages and publishes them as a GitLab Release.
+# GitLab.com mirror of the .github/workflows/ pipelines: `check:*` runs the
+# same test/lint/type checks as ci.yml on merge requests and on the default
+# branch, and `build:*` / `release` mirror release.yml on tags.
 #
 # This file lives at .gitlab/.gitlab-ci.yml rather than the repo root, so the
 # project's "CI/CD configuration file" setting (Settings > CI/CD > General
 # pipelines) must be set to `.gitlab/.gitlab-ci.yml` for GitLab to find it.
 #
-# Trigger: push a tag starting with `v` (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
+# Triggers: a merge request, a push to the default branch, or a tag starting
+# with `v` (e.g. `git tag v0.2.0 && git push origin v0.2.0`). Only the tag
+# pipeline packages and publishes anything.
 #
 # Runner requirements (adjust the `tags:` below to match your actual runners):
-#   - build:windows needs a Windows runner. GitLab.com's shared Windows
+#   - the Windows jobs need a Windows runner. GitLab.com's shared Windows
 #     runners are tagged `saas-windows-medium-amd64` at the time of writing.
-#   - build:macos needs a macOS runner with Xcode. GitLab.com's shared macOS
+#   - the macOS jobs need a macOS runner with Xcode. GitLab.com's shared macOS
 #     runners are tagged `saas-macos-medium-m1` and use an `image:` to pick
 #     the Xcode version (e.g. `macos-14-xcode-15`). Both are gated by plan
 #     tier -- confirm they're enabled for this project before relying on them.
+#     Since the checks now run per merge request rather than only per release,
+#     they are also the jobs most likely to run into a shared-runner quota.
 #
 # Release assets are uploaded to this project's generic package registry
 # first, then linked into the GitLab Release; `release-cli` itself can't
 # attach local files directly.
 
 stages:
+  - check
   - build
   - release
 
 workflow:
   rules:
+    # The release pipeline.
     - if: $CI_COMMIT_TAG =~ /^v/
+    # Checks on merge requests, and on the default branch after a merge.
+    # Branch pipelines are limited to the default branch on purpose: a branch
+    # with an open MR would otherwise be built twice for the same commit.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 variables:
   PACKAGE_REGISTRY_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/vitaline/${CI_COMMIT_TAG}"
@@ -33,20 +45,69 @@ variables:
 .rust_setup: &rust_setup
   - rustup default stable
 
-build:windows:
-  stage: build
+# Toolchain bootstrap, shared by the check and build jobs on each platform.
+# GitLab's shared runners don't ship Rust or Node.
+.windows_env:
   tags:
     - saas-windows-medium-amd64
   variables:
     RUSTUP_HOME: "C:\\rustup"
     CARGO_HOME: "C:\\cargo"
   before_script:
-    # GitLab's shared Windows runners don't ship Rust or Node by default.
     - Invoke-WebRequest -Uri "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" -OutFile rustup-init.exe
     - .\rustup-init.exe -y --default-toolchain stable
     - $env:Path = "$env:CARGO_HOME\bin;$env:Path"
     - choco install nodejs-lts -y
     - refreshenv
+
+.macos_env:
+  tags:
+    - saas-macos-medium-m1
+  image: macos-14-xcode-15
+  before_script:
+    - *rust_setup
+    - brew install node
+
+# Only on merge requests and the default branch; a tag pipeline is for
+# packaging, and these already passed before the commit was tagged.
+.check_rules:
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+
+# The mirror of .github/workflows/ci.yml. `npm run build` is `tsc --noEmit &&
+# vite build`; the cargo steps need the dist/ it produces, because
+# `generate_context!` reads the frontendDist directory at compile time.
+check:windows:
+  extends:
+    - .windows_env
+    - .check_rules
+  stage: check
+  script:
+    - npm ci
+    - npm run build
+    - cd src-tauri
+    - cargo test
+    - cargo clippy --all-targets -- -D warnings
+
+check:macos:
+  extends:
+    - .macos_env
+    - .check_rules
+  stage: check
+  script:
+    - npm ci
+    - npm run build
+    - cd src-tauri
+    - cargo test
+    - cargo clippy --all-targets -- -D warnings
+
+build:windows:
+  extends: .windows_env
+  stage: build
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
   script:
     # msi (WiX) is intentionally not built: light.exe failed consistently
     # on the equivalent GitHub Actions Windows runner (reproduced twice in
@@ -66,15 +127,15 @@ build:windows:
     expire_in: 1 week
 
 build:macos:
+  extends: .macos_env
   stage: build
-  tags:
-    - saas-macos-medium-m1
-  image: macos-14-xcode-15
-  before_script:
-    - *rust_setup
-    - rustup target add aarch64-apple-darwin x86_64-apple-darwin
-    - brew install node
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
   script:
+    # Only the packaging job needs both architectures; the check job builds
+    # for the runner's own target and would just be downloading a second
+    # standard library for nothing.
+    - rustup target add aarch64-apple-darwin x86_64-apple-darwin
     - npm ci
     - npm run app:build -- --target universal-apple-darwin
     - mkdir -p dist-assets
@@ -91,6 +152,8 @@ build:macos:
 
 release:
   stage: release
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
   needs:
     - build:windows
     - build:macos
