@@ -205,6 +205,27 @@ fn default_widget_opacity() -> f64 {
     0.94
 }
 
+impl WidgetConfig {
+    /// This config with `x`, `y`, `width` and `height` taken from `live`.
+    ///
+    /// Geometry is owned by the WINDOW, not by the settings form. The form
+    /// round-trips the whole config, so it sends back the position and size
+    /// it read when it was opened -- values that are stale the moment the
+    /// widget has been dragged since. Saving would then undo the drag, and
+    /// silently: nothing moves on screen, the old spot only comes back at the
+    /// next launch. `widget.rs` is the only writer for these four; `layer`
+    /// and `opacity` are the form's to set and are kept from `self`.
+    pub fn keeping_geometry_of(self, live: &Self) -> Self {
+        Self {
+            x: live.x,
+            y: live.y,
+            width: live.width,
+            height: live.height,
+            ..self
+        }
+    }
+}
+
 impl Default for WidgetConfig {
     fn default() -> Self {
         Self {
@@ -551,6 +572,40 @@ mod tests {
         // NaN would reach CSS as an invalid value and leave the widget with
         // no background; it falls back to fully opaque instead.
         assert_eq!(opacity_after(f64::NAN), 1.0);
+    }
+
+    /// Saving the settings must not move the widget: the form's copy of the
+    /// geometry is whatever it read when it was opened, and the window has
+    /// been dragged since.
+    #[test]
+    fn saving_settings_keeps_the_widgets_own_geometry() {
+        let live = WidgetConfig {
+            x: Some(200),
+            y: Some(80),
+            width: 420,
+            height: 500,
+            layer: WidgetLayer::Front,
+            opacity: 0.94,
+        };
+        // What the settings form sends back: the geometry it opened with,
+        // plus the two fields the user actually changed there.
+        let from_form = WidgetConfig {
+            x: Some(1500),
+            y: Some(20),
+            width: 340,
+            height: 300,
+            layer: WidgetLayer::Desktop,
+            opacity: 0.5,
+        };
+
+        let merged = from_form.keeping_geometry_of(&live);
+
+        assert_eq!((merged.x, merged.y), (live.x, live.y));
+        assert_eq!((merged.width, merged.height), (live.width, live.height));
+        // The form still owns these two, or the settings screen would do
+        // nothing at all.
+        assert_eq!(merged.layer, WidgetLayer::Desktop);
+        assert_eq!(merged.opacity, 0.5);
     }
 
     #[test]

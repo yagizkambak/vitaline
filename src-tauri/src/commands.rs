@@ -51,21 +51,28 @@ pub fn get_config(state: State<'_, AppState>) -> AppConfig {
 }
 
 #[tauri::command]
-pub async fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, String> {
-    let clean = config.sanitized();
+pub async fn save_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, String> {
+    let (clean, previous_mode) = {
+        let state = app.state::<AppState>();
+        let mut live = state.config.write();
+
+        // The widget's geometry belongs to the WINDOW, not to this payload;
+        // see `WidgetConfig::keeping_geometry_of`. Applied inside the write
+        // guard, and before `sanitized`, so a `Moved` event can't land
+        // between reading the live values and storing them, and so a
+        // hand-edited config still gets clamped on the way through.
+        config.widget = config.widget.keeping_geometry_of(&live.widget);
+
+        let clean = config.sanitized();
+        let previous_mode = live.display_mode;
+        *live = clean.clone();
+        (clean, previous_mode)
+    };
     crate::log::line(&format!(
         "save_config started: gitlab_url={}, watched={}",
         clean.gitlab_url,
         clean.watched.len()
     ));
-
-    let previous_mode = {
-        let state = app.state::<AppState>();
-        let mut config = state.config.write();
-        let previous_mode = config.display_mode;
-        *config = clean.clone();
-        previous_mode
-    };
     config::save(&app, &clean).map_err(|e| fail("Settings could not be saved", e))?;
 
     // Window behavior depends on the settings; apply it right away.
