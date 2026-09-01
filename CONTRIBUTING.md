@@ -1,7 +1,7 @@
 # Contributing to Vitaline
 
-Thanks for considering a contribution. This is a solo side project, but
-issues and pull requests are genuinely welcome.
+Thanks for considering a contribution. This started as a solo side project,
+and issues and pull requests are genuinely welcome.
 
 ## Getting set up
 
@@ -54,6 +54,14 @@ which of GitLab/GitHub/Azure DevOps. The log file
 (`%APPDATA%\dev.vitaline.desktop\vitaline.log` on Windows, shown at the
 bottom of the Settings window on either platform) usually has the actual
 error.
+
+## Contributors
+
+- **[Taha Çalışkan](https://github.com/Tahaknd)** — widget mode
+  ([#7](https://github.com/yagizkambak/vitaline/pull/7)): the second surface
+  the app can show its status on, a window you park anywhere and leave open
+  instead of a notch you hover over. Also `widget.rs`, which is where to
+  look first if you're adding a surface of your own.
 
 ## A note on how this project is built
 
