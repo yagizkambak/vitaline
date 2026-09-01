@@ -1,4 +1,8 @@
 use std::collections::{HashMap, HashSet};
+// Only the Windows/Linux `notch_revealed` field below uses this; on macOS an
+// unconditional import is an unused-import warning, and `cargo clippy -- -D
+// warnings` (see CONTRIBUTING.md) turns that into a failure.
+#[cfg(not(target_os = "macos"))]
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
