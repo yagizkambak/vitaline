@@ -185,12 +185,32 @@ body {
   border: 1px solid var(--line);
   border-top: none;
   border-radius: 0 0 var(--radius) var(--radius);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  /**
+   * No shadow while collapsed. The pill is ~268x34 at the very top edge of
+   * the screen, and the open state's `0 12px 40px` is larger than the pill
+   * it belongs to: it read as a permanent grey band under the bar rather
+   * than as depth. Worse, the window only carries `SPRING_SLACK` (26px)
+   * below the panel, so that shadow didn't even have room to fade out -- it
+   * was cut off by the window edge and ended in a hard line.
+   *
+   * `.panel--notched` had been given this treatment already; the notch-less
+   * path (Windows, and any Mac on an external or notch-less display) kept
+   * the open state's shadow permanently because the rule below it only ever
+   * matched `.panel--notched`.
+   *
+   * Transparent rather than `none` so it can be INTERPOLATED into the open
+   * state's shadow; `none` snaps in a single frame.
+   */
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
   overflow: hidden;
   height: var(--panel-h);
   transition:
     width var(--grow-close) var(--spring-close),
-    height var(--grow-close) var(--spring-close);
+    height var(--grow-close) var(--spring-close),
+    /* The shadow leaves FASTER than the panel shrinks, so one is never left
+       hanging under a pill that is already back to its collapsed size.
+       Plain ease -- a spring curve would overshoot the alpha and blur. */
+      box-shadow 180ms ease-out;
 }
 
 /**
@@ -208,6 +228,29 @@ body {
  */
 .panel:not(.panel--notched) {
   width: 100%;
+}
+
+/**
+ * Notch-less path: the shadow comes back while the panel is open, since the
+ * body then reaches down into the middle of the screen and has to lift off
+ * whatever is behind it.
+ *
+ * Deliberately shallower than the notched path's `0 12px 40px`. Here the
+ * panel fills its window edge to edge (`width: 100%` above) and the window
+ * carries only `SPRING_SLACK` (26px) beneath it, so the shadow has to finish
+ * inside that 26px or the window clips it and it ends in a hard line.
+ * 4 + 12 = 16px stays clear of the edge.
+ *
+ * Width and height repeat the base rule's curves unchanged; only the shadow
+ * is new. It fades in over the full growth rather than the 180ms it leaves
+ * by, so it can't arrive ahead of the panel it belongs to.
+ */
+.panel:not(.panel--notched).panel--open {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  transition:
+    width var(--grow-close) var(--spring-close),
+    height var(--grow-close) var(--spring-close),
+    box-shadow var(--grow-close) ease-out;
 }
 
 /* Notched Mac: the panel aligns to the NOTCH, not the window. */
