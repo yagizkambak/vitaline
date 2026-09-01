@@ -57,6 +57,13 @@ const PLACEMENT_DEFAULT = { horizontalOffset: 0, topOffset: 0 };
  */
 const NOTCH_WIDTH_RANGE = { min: 240, max: 900 };
 
+/**
+ * Poll interval bounds. Mirrors `MIN_POLL_SECONDS` / `MAX_POLL_SECONDS` in
+ * model.rs, which clamps whatever is saved anyway; these keep the field from
+ * offering a value that would come back changed.
+ */
+const POLL_RANGE = { min: 15, max: 3600 };
+
 /** "Centered", "320px left", "80px right". */
 function sideLabel(offset: number): string {
   if (offset === 0) return "Centered";
@@ -201,7 +208,7 @@ export function Settings() {
     gitlabUrl: config.gitlabUrl.trim().replace(/\/+$/, ""),
     githubUrl: config.githubUrl.trim().replace(/\/+$/, ""),
     azureOrgUrl: config.azureOrgUrl.trim().replace(/\/+$/, ""),
-    pollSeconds: Math.max(5, Math.round(config.pollSeconds)),
+    pollSeconds: Math.max(POLL_RANGE.min, Math.round(config.pollSeconds)),
     watched: config.watched
       .map((p) => ({
         id: p.id.trim(),
@@ -544,11 +551,17 @@ export function Settings() {
           <span>Refresh interval (seconds)</span>
           <input
             type="number"
-            min={5}
-            max={3600}
+            min={POLL_RANGE.min}
+            max={POLL_RANGE.max}
             value={config.pollSeconds}
             onChange={(e) => patch({ pollSeconds: Number(e.target.value) })}
           />
+          <small>
+            {POLL_RANGE.min} seconds at the fastest. Each watched GitHub
+            project costs four API requests per round, and the hourly limit is
+            5,000 — poll much harder than this and the app rate-limits the
+            token it needs to watch anything at all.
+          </small>
         </label>
         <label className="inline">
           <span>Bar width (notch only)</span>

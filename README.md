@@ -272,6 +272,10 @@ destroying it; the tray menu brings it back.)
 
 - Only the first 100 jobs per pipeline and the first 20 open MR/PRs per
   project are fetched; larger lists get truncated.
+- The refresh interval won't go below 15 seconds. Each watched GitHub project
+  costs four API requests per round against an hourly limit of 5,000, so a
+  faster poll would spend the token on watching rather than on working — two
+  repos at five seconds already exceed it.
 - On GitHub, run duration is approximated from `run_started_at → updated_at`
   (the API doesn't return a duration directly).
 - On Azure, a job's numeric id is its log id; a job whose log doesn't exist

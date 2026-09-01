@@ -193,6 +193,22 @@ pub const WIDGET_MAX_WIDTH: u32 = 4000;
 pub const WIDGET_MAX_HEIGHT: u32 = 4000;
 pub const WIDGET_MIN_OPACITY: f64 = 0.35;
 
+/// Bounds on how often the providers may be polled.
+///
+/// The floor is a rate limit, not a taste. One GitHub project costs four
+/// requests per cycle (repo metadata, open PRs, the latest run, that run's
+/// jobs), and GitHub allows an authenticated account 5,000 REST requests an
+/// hour. At the old five-second floor that is 2,880 requests an hour for a
+/// SINGLE project: two watched GitHub repos and the account is over the
+/// limit and rate-limited out of the app that is supposed to be watching
+/// them. Fifteen seconds holds one project to 960 an hour, so five of them
+/// still fit under the cap with room left for whatever else uses the token.
+///
+/// The ceiling is an hour, past which the app has stopped being a status
+/// display.
+pub const MIN_POLL_SECONDS: u64 = 15;
+pub const MAX_POLL_SECONDS: u64 = 3600;
+
 /// Bar width on a screen with no physical notch, in logical pixels.
 ///
 /// A notched Mac ignores this: there the pill's width is MEASURED from its
@@ -391,7 +407,7 @@ impl AppConfig {
             self.github_url = default_github_url();
         }
         self.azure_org_url = self.azure_org_url.trim().trim_end_matches('/').to_string();
-        self.poll_seconds = self.poll_seconds.clamp(5, 3600);
+        self.poll_seconds = self.poll_seconds.clamp(MIN_POLL_SECONDS, MAX_POLL_SECONDS);
         self.top_offset = self.top_offset.clamp(0, TOP_OFFSET_MAX);
         self.horizontal_offset = self
             .horizontal_offset
@@ -683,6 +699,29 @@ mod tests {
 
     /// The bar can't be narrowed until its own counters clip, and a config
     /// written before it was adjustable gets the default rather than a zero.
+    /// The floor exists to keep the app from rate-limiting its own token; a
+    /// config file that asks for a faster poll than that has to come back
+    /// slowed down, not honored.
+    #[test]
+    fn poll_interval_is_clamped() {
+        let clamped = |seconds: u64| {
+            AppConfig {
+                poll_seconds: seconds,
+                ..AppConfig::default()
+            }
+            .sanitized()
+            .poll_seconds
+        };
+
+        assert_eq!(clamped(1), MIN_POLL_SECONDS);
+        assert_eq!(clamped(0), MIN_POLL_SECONDS);
+        assert_eq!(clamped(u64::MAX), MAX_POLL_SECONDS);
+        assert_eq!(clamped(120), 120);
+        // The default has to sit inside its own bounds, or every fresh
+        // install would be corrected on its first save.
+        assert_eq!(clamped(default_poll()), default_poll());
+    }
+
     #[test]
     fn notch_width_is_clamped() {
         let config: AppConfig = serde_json::from_str(r#"{"gitlabUrl":"https://gitlab.com"}"#)
