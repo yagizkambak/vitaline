@@ -12,12 +12,17 @@ with hot reload.
 ## Before opening a PR
 
 ```bash
-cd src-tauri && cargo test && cargo clippy -- -D warnings
+cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings
 cd .. && npx tsc --noEmit
 ```
 
 All three should be clean. There's no separate JS/TS test suite yet — the
 Rust side (where all the provider/HTTP logic lives) is what's covered.
+
+CI runs exactly these on both Windows and macOS for every PR. Running them
+on one platform is worth doing before you push, but it can't be conclusive:
+much of this codebase is `#[cfg]`-gated, so a warning that fails the build on
+one platform can be invisible on the other.
 
 ## Code style
 

@@ -1,0 +1,75 @@
+# The checks CONTRIBUTING.md asks contributors to run, enforced on every pull
+# request and every push to main. Packaging lives in release.yml and runs on
+# tags instead; nothing here builds or uploads an artifact.
+#
+# WHY BOTH PLATFORMS: most of this app's tricky code is `#[cfg]`-gated or
+# CSS-scoped per platform, so a single runner is blind to half of it by
+# construction. A dead-code warning that only fires on Windows (`HoverRect`)
+# sat in main unnoticed precisely because it is invisible on macOS.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only: this workflow never writes to the repo or to releases.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the previous run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    strategy:
+      # Report both platforms. Stopping at the first failure would hide
+      # whether a break is platform-specific, which is the main thing this
+      # matrix exists to tell us.
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.platform }}
+    name: checks (${{ matrix.platform }})
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Pinned to the `stable` channel rather than a SHA, the same way
+      # release.yml does it: this action is designed to be used that way.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: src-tauri
+          # Release builds cache a different profile and target; keep the two
+          # from evicting each other.
+          key: checks-${{ matrix.platform }}
+
+      - run: npm ci
+
+      # `tsc --noEmit && vite build`. Not just the type check: the cargo steps
+      # below need dist/ to exist, because `generate_context!` reads the
+      # frontendDist directory at compile time and fails without it.
+      - name: Build the frontend (type check included)
+        run: npm run build
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test
+
+      # --all-targets so the test code is linted too; that is where an unused
+      # import or fixture is most likely to accumulate.
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
