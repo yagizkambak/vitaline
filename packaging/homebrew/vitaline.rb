@@ -9,8 +9,8 @@
 # the official tap (deadline September 2026). Unless the app is signed with
 # an Apple Developer ID, our own tap is the only viable path.
 cask "vitaline" do
-  version "0.1.0"
-  sha256 "f108269c691955355bb14114ccb1427e3d5d8ff38f5da6fa1988922a81d348c9"
+  version "0.2.0"
+  sha256 "933101aeb0831423d63532cf1cd4830ed981ad190cdd7c9eaf9a6e3cd5125251"
 
   url "https://github.com/yagizkambak/vitaline/releases/download/v#{version}/Vitaline_#{version}_universal.dmg"
   name "Vitaline"
