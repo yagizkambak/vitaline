@@ -78,6 +78,19 @@ export interface AppConfig {
   showOnAllSpaces: boolean;
   /** How far the notch is offset down from the top of the screen (px). */
   topOffset: number;
+  /**
+   * Bar width on a screen with no physical notch (px). A notched Mac ignores
+   * it: there the pill's width is measured from its own content plus the hole
+   * in the display. Clamped to 240..900 by Rust.
+   */
+  notchWidth: number;
+  /**
+   * Nudge left (negative) or right (positive) of the horizontal center, in
+   * px. 0 is dead center. Rust clamps the result into the screen's work area,
+   * so a value larger than the screen just parks the notch against that edge.
+   * A screen with a physical notch ignores this.
+   */
+  horizontalOffset: number;
   /** Also watch open merge requests (one extra request per project). */
   watchMergeRequests: boolean;
   notifyOnNewMergeRequest: boolean;

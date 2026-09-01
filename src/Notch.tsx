@@ -12,7 +12,9 @@ import { useNotchAutosize } from "./hooks/useNotchAutosize";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useSnapshot } from "./hooks/useSnapshot";
 import {
+  getConfig,
   notchMetrics,
+  onConfig,
   onHover,
   onTicker,
   onToggle,
@@ -23,17 +25,16 @@ import {
   setNotchVisible,
 } from "./lib/api";
 import { statusTone, timeAgo } from "./lib/status";
-import type { NotchMetrics, Snapshot, TickerItem } from "./types";
+import type { AppConfig, NotchMetrics, Snapshot, TickerItem } from "./types";
 
 /**
- * Size used on notch-less screens (external monitor, Windows, Linux).
- *
- * On a notched Mac the pill is physically embedded in the notch, so it still
- * reads as "anchored" even though it's small. There's no such reference
- * point on a notch-less screen; the same small size just got lost on the
- * desktop. So it's a bit bigger and more prominent here.
+ * Fallback bar width for notch-less screens, used for the frame or two before
+ * the config arrives. Matches `default_notch_width` in model.rs; if that
+ * changes, change this too. The real value is `config.notchWidth` -- see
+ * `NOTCH_MIN_WIDTH` there for why this one is a number rather than a
+ * measurement of the content, the way the notched Mac's pill is.
  */
-const PLAIN_COLLAPSED_WIDTH = 560;
+const FALLBACK_COLLAPSED_WIDTH = 240;
 const PLAIN_PILL_HEIGHT = 40;
 /**
  * Width of the "ears" the pill carries on either side of the notch on a
@@ -184,6 +185,11 @@ export function Notch() {
   const ticker = tickerQueue[0] ?? null;
   /** The screen's real notch dimensions; assumed notch-less if unmeasurable. */
   const [metrics, setMetrics] = useState<NotchMetrics | null>(null);
+  /**
+   * Bar width off a notched screen. Held here rather than read at render time
+   * because it comes over IPC; the fallback covers the first frame or two.
+   */
+  const [barWidth, setBarWidth] = useState(FALLBACK_COLLAPSED_WIDTH);
   const panelRef = useRef<HTMLDivElement>(null);
   /**
    * The body's NATURAL height. We can't measure the panel's own height since
@@ -252,17 +258,35 @@ export function Notch() {
    * size, the overshoot moments would clip and the spring's whole effect
    * would be lost.
    */
+  /**
+   * How wide the panel is once it's open.
+   *
+   * Never narrower than the collapsed bar. `EXPANDED_WIDTH` is a constant,
+   * while the bar's own width is the user's to set, so a bar set wider than
+   * this used to SHRINK on hover: the panel opened downward and inward at the
+   * same time. Above that width the panel simply stops growing sideways and
+   * only opens down, which is what a wide bar should do anyway.
+   *
+   * A notched Mac is unaffected -- its collapsed pill is measured from the
+   * notch and its content, and is always far narrower than this.
+   */
+  const openWidth = notched
+    ? EXPANDED_WIDTH
+    : Math.max(EXPANDED_WIDTH, barWidth);
+
   const targetWindowWidth = notched
     ? notchWidth + (Math.max(leftEar, rightEar) + SPRING_SLACK) * 2
     : expanded
-      ? EXPANDED_WIDTH
+      ? openWidth
       : showTicker
-        // The ear system is disabled on the notch-less path (leftEar/rightEar
-        // are always 0), so the ticker would also get squeezed down to
-        // PLAIN_COLLAPSED_WIDTH and clip. We apply the same TICKER_WIDTH used
-        // on the Mac path here too, without touching its own calc (tickerEar).
-        ? TICKER_WIDTH
-        : PLAIN_COLLAPSED_WIDTH;
+        ? // The ear system is disabled on the notch-less path (leftEar/rightEar
+          // are always 0), so the ticker would otherwise be squeezed down to
+          // the bar's own width and clip. It gets the same TICKER_WIDTH the Mac
+          // path uses, without touching its own calc (tickerEar) -- but never
+          // less than the bar already is, or a bar set wider than the ticker
+          // would SHRINK to deliver an announcement.
+          Math.max(TICKER_WIDTH, barWidth)
+        : barWidth;
 
   useEffect(() => {
     const el = groupRef.current;
@@ -332,6 +356,23 @@ export function Notch() {
       window.removeEventListener("resize", read);
     };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    getConfig()
+      .then((config) => alive && setBarWidth(config.notchWidth))
+      .catch(() => {
+        // Keep the fallback; a bar of the wrong width beats no bar.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // The width slider in the settings window applies on save.
+  useTauriEvent(onConfig, (config: AppConfig) =>
+    setBarWidth(config.notchWidth),
+  );
 
   useTauriEvent(onToggle, () => setPinned((v) => !v));
 
@@ -456,7 +497,7 @@ export function Notch() {
             "--right-ear": `${rightEar}px`,
           }),
           "--panel-h": `${panelHeight}px`,
-          "--open-w": `${EXPANDED_WIDTH}px`,
+          "--open-w": `${openWidth}px`,
           "--ticker-h": `${TICKER_HEIGHT}px`,
         } as CSSProperties
       }
@@ -469,9 +510,9 @@ export function Notch() {
         onClick={() => setPinned((v) => !v)}
       >
         {/* Notched: the dot and the counters share the single ear left of
-            the notch, inside `.pill__inner` (the measured box). Notch-less:
-            both wrappers are `display: contents`, so these two become direct
-            children of `.pill` again and spread to its edges as before. */}
+          the notch, inside `.pill__inner` (the measured box). Notch-less:
+          both wrappers are `display: contents`, so these two become direct
+          children of `.pill` again and spread to its edges as before. */}
         <span className="pill__group">
           <span ref={groupRef} className="pill__inner">
             <span className="pill__status">
@@ -531,7 +572,7 @@ export function Notch() {
       </div>
 
       {/* Announcement ticker: a subtitle-like strip that opens BELOW the
-          notch. The panel grows for this (see panelHeight). */}
+        notch. The panel grows for this (see panelHeight). */}
       {showTicker && ticker && (
         <div
           className={`ticker ${tickerTone(ticker.text)}`}
@@ -573,8 +614,8 @@ export function Notch() {
                 {pinned ? "Release" : "Pin"}
               </button>
               {/* Switching surfaces from the panel itself: the tray menu and
-                  the settings window both have this too, but neither is where
-                  someone is looking when they decide the notch is in the way. */}
+                the settings window both have this too, but neither is where
+                someone is looking when they decide the notch is in the way. */}
               <button
                 type="button"
                 title="Show a free-floating widget instead of the notch"
@@ -592,11 +633,14 @@ export function Notch() {
               <button type="button" onClick={() => void openSettings()}>
                 Settings
               </button>
-              <button type="button" onClick={() => void setNotchVisible(false)}>
+              <button
+                type="button"
+                onClick={() => void setNotchVisible(false)}
+              >
                 Hide
               </button>
               {/* The tray icon was easy to miss and there was no other
-                  visible way to quit the app. */}
+                visible way to quit the app. */}
               <button
                 type="button"
                 className="danger"
@@ -620,7 +664,8 @@ export function Notch() {
 
           {snapshot && !snapshot.configured && (
             <div className="banner">
-              First enter your GitLab URL, token, and the projects you want to watch.{" "}
+              First enter your GitLab URL, token, and the projects you want to
+              watch.{" "}
               <button
                 type="button"
                 className="linkish"

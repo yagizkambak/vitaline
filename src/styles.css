@@ -223,8 +223,17 @@ body {
  * accident; there was nothing to hide it in the collapsed pill.
  *
  * `width: 100%` ties the panel's width to the viewport, i.e. the WINDOW size
- * given by Rust's `set_size`. The notched Mac path never hits this --
- * `.panel--notched` overrides its own `width: calc(...)` below.
+ * given by Rust's `set_size`. It therefore does NOT animate: a transition
+ * runs on the computed value, and `100%` stays `100%` however the window is
+ * resized, so the panel's width snaps while its height springs. Giving it a
+ * pixel width does animate it -- and makes the panel's own edges sweep across
+ * a stationary cursor on every open and close, which DOM mouseenter/mouseleave
+ * answer with enter/leave pairs the panel then fights over. Animating it needs
+ * hover to stop coming from the DOM first, the way macOS already reads the
+ * cursor in Rust (`notch::watch_cursor`).
+ *
+ * The notched Mac path never hits this -- `.panel--notched` overrides its own
+ * `width: calc(...)` below.
  */
 .panel:not(.panel--notched) {
   width: 100%;

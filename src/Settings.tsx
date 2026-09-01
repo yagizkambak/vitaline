@@ -7,6 +7,7 @@ import {
   getTokenStates,
   logPath,
   onConfig,
+  previewNotchPlacement,
   saveConfig,
   setToken,
 } from "./lib/api";
@@ -30,6 +31,37 @@ const PROVIDER_LABELS: Record<ProviderKind, string> = {
   github: "GitHub",
   azure: "Azure DevOps",
 };
+
+/**
+ * How far the horizontal slider travels each way: half the work area, so its
+ * two ends reach the screen's left and right edges.
+ *
+ * Read off the settings window's own screen, which is normally the one the
+ * notch is on. Being wrong costs nothing: Rust clamps the offset into the real
+ * work area at placement time, so an over-long slider just goes inert at the
+ * ends and a short one stops before the edge.
+ */
+const SLIDER_REACH = Math.round((window.screen?.availWidth ?? 1920) / 20) * 10;
+
+/**
+ * Where the notch sits with nothing configured: dead center, flush with the
+ * top edge. Matches `AppConfig::default` in model.rs; if that changes, change
+ * this too.
+ */
+const PLACEMENT_DEFAULT = { horizontalOffset: 0, topOffset: 0 };
+
+/**
+ * Bar width bounds. Mirrors `NOTCH_MIN_WIDTH` / `NOTCH_MAX_WIDTH` in model.rs,
+ * which clamps whatever is saved anyway; these only keep the slider from
+ * offering a value that would come back changed.
+ */
+const NOTCH_WIDTH_RANGE = { min: 240, max: 900 };
+
+/** "Centered", "320px left", "80px right". */
+function sideLabel(offset: number): string {
+  if (offset === 0) return "Centered";
+  return `${Math.abs(offset)}px ${offset < 0 ? "left" : "right"}`;
+}
 
 const ID_PLACEHOLDERS: Record<ProviderKind, string> = {
   gitlab: "group/project",
@@ -519,17 +551,100 @@ export function Settings() {
           />
         </label>
         <label className="inline">
-          <span>Offset from the top edge (px, notch only)</span>
+          <span>Bar width (notch only)</span>
           <input
-            type="number"
+            type="range"
+            min={NOTCH_WIDTH_RANGE.min}
+            max={NOTCH_WIDTH_RANGE.max}
+            step={10}
+            value={config.notchWidth}
+            onChange={(e) => patch({ notchWidth: Number(e.target.value) })}
+          />
+          <span>{config.notchWidth}px</span>
+          <small>
+            How much of the top edge the collapsed bar covers. A screen with a
+            physical notch ignores this — there the pill is measured from its
+            own content and the notch it sits in. Unlike the two below, this
+            one applies on save rather than as you drag.
+          </small>
+        </label>
+        <label className="inline">
+          <span>Position across the screen (notch only)</span>
+          <input
+            type="range"
+            min={-SLIDER_REACH}
+            max={SLIDER_REACH}
+            step={10}
+            value={config.horizontalOffset}
+            onChange={(e) => {
+              const horizontalOffset = Number(e.target.value);
+              patch({ horizontalOffset });
+              // Moves the bar right away; Save is what keeps it.
+              void previewNotchPlacement(config.topOffset, horizontalOffset);
+            }}
+          />
+          <span>{sideLabel(config.horizontalOffset)}</span>
+          {config.horizontalOffset !== PLACEMENT_DEFAULT.horizontalOffset && (
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => {
+                patch({
+                  horizontalOffset: PLACEMENT_DEFAULT.horizontalOffset,
+                });
+                void previewNotchPlacement(
+                  config.topOffset,
+                  PLACEMENT_DEFAULT.horizontalOffset,
+                );
+              }}
+            >
+              Reset
+            </button>
+          )}
+          <small>
+            Centered, the bar sits over a maximized browser's tab strip and
+            address bar, and it swallows clicks there. Drag either way to get
+            out from under them; the ends park it against the screen's edges.
+            A screen with a physical notch ignores this — the panel belongs to
+            the notch.
+          </small>
+        </label>
+        <label className="inline">
+          <span>Offset from the top edge (notch only)</span>
+          <input
+            type="range"
             min={0}
             max={200}
+            step={2}
             value={config.topOffset}
-            onChange={(e) => patch({ topOffset: Number(e.target.value) })}
+            onChange={(e) => {
+              const topOffset = Number(e.target.value);
+              patch({ topOffset });
+              void previewNotchPlacement(topOffset, config.horizontalOffset);
+            }}
           />
+          <span>
+            {config.topOffset === 0 ? "Flush" : `${config.topOffset}px down`}
+          </span>
+          {config.topOffset !== PLACEMENT_DEFAULT.topOffset && (
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => {
+                patch({ topOffset: PLACEMENT_DEFAULT.topOffset });
+                void previewNotchPlacement(
+                  PLACEMENT_DEFAULT.topOffset,
+                  config.horizontalOffset,
+                );
+              }}
+            >
+              Reset
+            </button>
+          )}
           <small>
             0 to sit inside the notch on macOS; a bit of offset looks better
-            on Windows.
+            on Windows. Both sliders move the bar as you drag them; closing
+            this window without saving puts it back.
           </small>
         </label>
         <label className="check">

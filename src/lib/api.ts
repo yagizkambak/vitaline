@@ -87,6 +87,16 @@ export const setNotchVisible = (visible: boolean) =>
 /** The screen's real notch dimensions; the pill is sized from these. */
 export const notchMetrics = () => invoke<NotchMetrics>("notch_metrics");
 
+/**
+ * Moves the notch without saving anything — what the two placement sliders
+ * call on every step, so the bar travels while you drag. Closing the settings
+ * window without saving puts it back.
+ */
+export const previewNotchPlacement = (
+  topOffset: number,
+  horizontalOffset: number,
+) => invoke<void>("preview_notch_placement", { topOffset, horizontalOffset });
+
 /** Switches surfaces: hides the notch and opens the widget, or the reverse. */
 export const setDisplayMode = (mode: DisplayMode) =>
   invoke<void>("set_display_mode", { mode });

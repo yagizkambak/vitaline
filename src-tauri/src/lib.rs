@@ -63,6 +63,7 @@ pub fn run() {
             commands::set_notch_size,
             commands::set_notch_visible,
             commands::notch_metrics,
+            commands::preview_notch_placement,
             commands::set_display_mode,
             commands::set_widget_visible,
             commands::open_settings,
@@ -88,7 +89,7 @@ pub fn run() {
                 }
             }
             let show_on_all_spaces = config.show_on_all_spaces;
-            let top_offset = config.top_offset;
+            let placement = notch::Placement::of(&config);
             let start_collapsed = config.start_collapsed;
             let display_mode = config.display_mode;
 
@@ -103,7 +104,7 @@ pub fn run() {
                     &window,
                     notch::INITIAL_WIDTH,
                     notch::INITIAL_HEIGHT,
-                    top_offset,
+                    placement,
                     // The panel rect isn't known until the frontend renders;
                     // the window is the pill's exact size at this point anyway.
                     None,

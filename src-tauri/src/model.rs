@@ -193,6 +193,32 @@ pub const WIDGET_MAX_WIDTH: u32 = 4000;
 pub const WIDGET_MAX_HEIGHT: u32 = 4000;
 pub const WIDGET_MIN_OPACITY: f64 = 0.35;
 
+/// Bar width on a screen with no physical notch, in logical pixels.
+///
+/// A notched Mac ignores this: there the pill's width is MEASURED from its
+/// own content plus the width of the hole in the display. Off a notched
+/// screen there is no such box to measure -- the collapsed pill lays its dot
+/// and counters out with `space-between` across the full bar, and the
+/// wrappers that would have been measured are `display: contents`, which have
+/// no box at all. So the width is a number rather than a measurement, and
+/// therefore something the user gets to choose: it is the footprint the bar
+/// keeps over whatever is underneath it.
+pub const NOTCH_MIN_WIDTH: u32 = 240;
+pub const NOTCH_MAX_WIDTH: u32 = 900;
+
+fn default_notch_width() -> u32 {
+    240
+}
+
+/// How far down the notch can be pushed from the top edge.
+pub const TOP_OFFSET_MAX: i32 = 400;
+/// Bound on `horizontal_offset`, either way. Only a guard against a nonsense
+/// value in a hand-edited file: the bound that decides where the bar actually
+/// lands is applied at placement time against the real work area (see
+/// `notch::place`), which is what lets a deliberately huge value mean "as far
+/// over as this screen allows".
+pub const HORIZONTAL_OFFSET_LIMIT: i32 = 20_000;
+
 fn default_widget_width() -> u32 {
     340
 }
@@ -277,6 +303,26 @@ pub struct AppConfig {
     pub show_on_all_spaces: bool,
     #[serde(default)]
     pub top_offset: i32,
+    /// Bar width on a screen with no physical notch; see `NOTCH_MIN_WIDTH`.
+    #[serde(default = "default_notch_width")]
+    pub notch_width: u32,
+    /// How far the notch is nudged left (negative) or right (positive) of the
+    /// horizontal center, in logical pixels. `0` is dead center, which is
+    /// where the app has always put it.
+    ///
+    /// Centered is the worst place for it on a screen with no physical notch:
+    /// that is where a maximized browser keeps its tab strip and address bar,
+    /// and the window swallows clicks over its whole rect, so it is not only
+    /// in the way visually. A notched Mac ignores this -- the panel is
+    /// aligned to the hole in the display, and nothing else is a legal
+    /// position for it.
+    ///
+    /// Measured from the CENTER rather than from an edge so that the default
+    /// can be `0`: there is no pixel value that means "centered" on every
+    /// screen, so an offset from the left edge would have had to move every
+    /// existing user's notch to say what it says today.
+    #[serde(default)]
+    pub horizontal_offset: i32,
     /// Also watch open merge requests (one extra request per project).
     #[serde(default = "yes")]
     pub watch_merge_requests: bool,
@@ -322,6 +368,8 @@ impl Default for AppConfig {
             start_collapsed: true,
             show_on_all_spaces: true,
             top_offset: 0,
+            horizontal_offset: 0,
+            notch_width: default_notch_width(),
             watch_merge_requests: true,
             notify_on_new_merge_request: true,
             notify_only_watched_branch_mr: true,
@@ -344,7 +392,11 @@ impl AppConfig {
         }
         self.azure_org_url = self.azure_org_url.trim().trim_end_matches('/').to_string();
         self.poll_seconds = self.poll_seconds.clamp(5, 3600);
-        self.top_offset = self.top_offset.clamp(0, 400);
+        self.top_offset = self.top_offset.clamp(0, TOP_OFFSET_MAX);
+        self.horizontal_offset = self
+            .horizontal_offset
+            .clamp(-HORIZONTAL_OFFSET_LIMIT, HORIZONTAL_OFFSET_LIMIT);
+        self.notch_width = self.notch_width.clamp(NOTCH_MIN_WIDTH, NOTCH_MAX_WIDTH);
         self.widget.width = self.widget.width.clamp(WIDGET_MIN_WIDTH, WIDGET_MAX_WIDTH);
         self.widget.height = self
             .widget
@@ -606,6 +658,48 @@ mod tests {
         // nothing at all.
         assert_eq!(merged.layer, WidgetLayer::Desktop);
         assert_eq!(merged.opacity, 0.5);
+    }
+
+    /// A config written before the notch could be moved keeps it centered,
+    /// and an absurd hand-edited value can't overflow the placement math.
+    #[test]
+    fn horizontal_offset_defaults_to_centered_and_is_bounded() {
+        let config: AppConfig = serde_json::from_str(r#"{"gitlabUrl":"https://gitlab.com"}"#)
+            .expect("a config without the field should still load");
+        assert_eq!(config.horizontal_offset, 0);
+
+        let clamped = |offset: i32| {
+            AppConfig {
+                horizontal_offset: offset,
+                ..AppConfig::default()
+            }
+            .sanitized()
+            .horizontal_offset
+        };
+        assert_eq!(clamped(-500), -500);
+        assert_eq!(clamped(i32::MIN), -HORIZONTAL_OFFSET_LIMIT);
+        assert_eq!(clamped(i32::MAX), HORIZONTAL_OFFSET_LIMIT);
+    }
+
+    /// The bar can't be narrowed until its own counters clip, and a config
+    /// written before it was adjustable gets the default rather than a zero.
+    #[test]
+    fn notch_width_is_clamped() {
+        let config: AppConfig = serde_json::from_str(r#"{"gitlabUrl":"https://gitlab.com"}"#)
+            .expect("a config without the field should still load");
+        assert_eq!(config.notch_width, default_notch_width());
+
+        let clamped = |width: u32| {
+            AppConfig {
+                notch_width: width,
+                ..AppConfig::default()
+            }
+            .sanitized()
+            .notch_width
+        };
+        assert_eq!(clamped(0), NOTCH_MIN_WIDTH);
+        assert_eq!(clamped(u32::MAX), NOTCH_MAX_WIDTH);
+        assert_eq!(clamped(520), 520);
     }
 
     #[test]
