@@ -27,6 +27,30 @@ pub fn window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(LABEL)
 }
 
+/// The parts of the config that decide WHERE the window goes, as opposed to
+/// how big it is. Grouped so `place` doesn't grow another positional `i32`
+/// every time a placement setting is added -- two adjacent bare integers at a
+/// call site is exactly how they end up swapped.
+///
+/// `horizontal_offset` is only read off a screen without a physical notch, so
+/// on macOS the field is dead in the same way `HoverRect`'s are on Windows;
+/// the lint is gated for the same reason.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[derive(Clone, Copy, Debug)]
+pub struct Placement {
+    pub top_offset: i32,
+    pub horizontal_offset: i32,
+}
+
+impl Placement {
+    pub fn of(config: &crate::model::AppConfig) -> Self {
+        Self {
+            top_offset: config.top_offset,
+            horizontal_offset: config.horizontal_offset,
+        }
+    }
+}
+
 /// The notch's location on screen, relative to the primary screen's TOP-LEFT
 /// corner (Quartz orientation, y increases downward) -- the same space as
 /// `CGEventGetLocation`. `place_macos` updates this on every placement, the
@@ -188,7 +212,7 @@ pub fn place(
     window: &WebviewWindow,
     width: u32,
     height: u32,
-    top_offset: i32,
+    placement: Placement,
     hover: Option<HoverRect>,
 ) {
     // Only a report that carries a panel rect comes from the frontend, and
@@ -205,7 +229,7 @@ pub fn place(
             window,
             width as f64,
             height as f64,
-            top_offset as f64,
+            placement.top_offset as f64,
             hover,
         );
         return;
@@ -232,12 +256,33 @@ pub fn place(
         };
 
         let scale = monitor.scale_factor();
-        let origin = monitor.position();
-        let size = monitor.size();
+        // The WORK AREA, not the full monitor: a taskbar docked to the left
+        // or right edge shifts where "the left edge of the screen" is, and a
+        // left-aligned notch would otherwise start underneath it.
+        let area = monitor.work_area();
+        let origin = area.position;
+        let size = area.size;
 
         let physical_width = (width as f64 * scale).round() as i32;
-        let x = origin.x + (size.width as i32 - physical_width) / 2;
-        let y = origin.y + (top_offset as f64 * scale).round() as i32;
+        // How much room is left over once the window is laid down. Negative
+        // if the window is wider than the work area, which `clamp` below then
+        // resolves in favor of the left edge.
+        let free = size.width as i32 - physical_width;
+        let offset = (placement.horizontal_offset as f64 * scale).round() as i32;
+
+        // Centered, then nudged. The offset is measured from the center
+        // rather than from an edge so that `0` means what the app has always
+        // done; see `AppConfig::horizontal_offset`.
+        //
+        // Clamped into the work area afterwards, which is what makes an
+        // extreme value usable rather than dangerous: the user doesn't have
+        // to work out the exact pixel that puts the bar against the right
+        // edge, they can ask for far more than the screen has and land
+        // flush. It also keeps the bar on screen while the panel GROWS --
+        // opening near an edge widens the window by 140px, and without this
+        // the far side would slide off.
+        let x = origin.x + (free / 2 + offset).clamp(0, free.max(0));
+        let y = origin.y + (placement.top_offset as f64 * scale).round() as i32;
 
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }
@@ -249,7 +294,7 @@ pub fn place(
 /// offset) but have no business changing its SIZE. Falls back to the startup
 /// pill only if the frontend has never reported -- i.e. only before its first
 /// render, where that placeholder is in fact correct.
-pub fn replace(window: &WebviewWindow, top_offset: i32) {
+pub fn replace(window: &WebviewWindow, placement: Placement) {
     // Copy the value out into its OWN statement first. Matching on
     // `*LAST_GEOMETRY.lock()` directly keeps the guard alive across the whole
     // match -- arms included -- and `place` locks the same mutex, so a
@@ -257,8 +302,8 @@ pub fn replace(window: &WebviewWindow, top_offset: i32) {
     // on Hide -> Show.
     let last = *LAST_GEOMETRY.lock();
     match last {
-        Some((width, height, hover)) => place(window, width, height, top_offset, Some(hover)),
-        None => place(window, INITIAL_WIDTH, INITIAL_HEIGHT, top_offset, None),
+        Some((width, height, hover)) => place(window, width, height, placement, Some(hover)),
+        None => place(window, INITIAL_WIDTH, INITIAL_HEIGHT, placement, None),
     }
 }
 
@@ -740,9 +785,9 @@ pub fn reveal(app: &AppHandle) {
         return;
     };
     let state = app.state::<crate::state::AppState>();
-    let (show_on_all_spaces, top_offset) = {
+    let (show_on_all_spaces, placement) = {
         let config = state.config.read();
-        (config.show_on_all_spaces, config.top_offset)
+        (config.show_on_all_spaces, Placement::of(&config))
     };
 
     let _ = window.show();
@@ -752,7 +797,7 @@ pub fn reveal(app: &AppHandle) {
     // the webview, so the frontend has no reason to re-report anything on the
     // way back -- its own state didn't change. Placing the startup pill here
     // was therefore permanent, not "only the first frame".
-    replace(&window, top_offset);
+    replace(&window, placement);
 }
 
 /// Window behaviors applied on every startup and settings change.
@@ -913,7 +958,7 @@ pub fn open_settings(app: &AppHandle) -> tauri::Result<()> {
         let _ = window.destroy();
     }
 
-    tauri::WebviewWindowBuilder::new(
+    let settings = tauri::WebviewWindowBuilder::new(
         app,
         SETTINGS_LABEL,
         tauri::WebviewUrl::App("settings.html".into()),
@@ -923,6 +968,31 @@ pub fn open_settings(app: &AppHandle) -> tauri::Result<()> {
     .min_inner_size(560.0, 420.0)
     .resizable(true)
     .build()?;
+
+    // The horizontal slider moves the notch live, without saving anything
+    // (`commands::preview_notch_offset`). If this window goes away without a
+    // Save, the bar is left wherever the slider was last dragged and only a
+    // restart would put it back -- so the saved position is restored here.
+    //
+    // Registered per BUILD, not per open: the reuse path above returns before
+    // reaching this, and closing the settings window destroys it, so each
+    // live window gets exactly one handler.
+    let handle = app.clone();
+    settings.on_window_event(move |event| {
+        if !matches!(event, tauri::WindowEvent::Destroyed) {
+            return;
+        }
+        // `try_state` and a guard that ends with the statement: this runs on
+        // a window event, where a panic would take the app down and a lock
+        // held across `replace` would be one more chance to deadlock.
+        let Some(state) = handle.try_state::<crate::state::AppState>() else {
+            return;
+        };
+        let placement = Placement::of(&state.config.read());
+        if let Some(window) = window(&handle) {
+            replace(&window, placement);
+        }
+    });
 
     Ok(())
 }

@@ -5,7 +5,7 @@
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::model::{AppConfig, DisplayMode, ProviderKind, Snapshot, TokenState, TokenStates};
+use crate::model::{self, AppConfig, DisplayMode, ProviderKind, Snapshot, TokenState, TokenStates};
 use crate::providers::{self, Client};
 use crate::state::AppState;
 use crate::{config, notch, refresh, secrets, widget};
@@ -81,7 +81,7 @@ pub async fn save_config(app: AppHandle, mut config: AppConfig) -> Result<AppCon
         // Only the top offset can have changed here, so we re-place at the
         // size the frontend last reported. Reading it back off the window
         // instead would lose the panel rect -- and with it the hover zone.
-        notch::replace(&window, clean.top_offset);
+        notch::replace(&window, notch::Placement::of(&clean));
     }
 
     // Only switch surfaces if the MODE itself changed. `apply_mode` reveals
@@ -287,8 +287,8 @@ pub fn set_notch_size(
     let Some(window) = notch::window(&app) else {
         return Ok(());
     };
-    let top_offset = app.state::<AppState>().config.read().top_offset;
-    notch::place(&window, width.max(1), height.max(1), top_offset, hover);
+    let placement = notch::Placement::of(&app.state::<AppState>().config.read());
+    notch::place(&window, width.max(1), height.max(1), placement, hover);
 
     // Windows/Linux only: macOS already calls show() directly in setup().
     // First size report: the frontend being able to call this IPC is proof
@@ -309,6 +309,39 @@ pub fn set_notch_size(
             let _ = window.show();
         }
     }
+    Ok(())
+}
+
+/// Moves the notch WITHOUT saving anything.
+///
+/// The two placement sliders call this on every step, so the bar travels
+/// under the cursor instead of only jumping once Save is pressed. Nothing is
+/// written to disk and the live config isn't touched either: Save is still
+/// what makes it real, and closing the settings window without saving puts
+/// the bar back (see `notch::open_settings`).
+///
+/// The values are clamped exactly the way `AppConfig::sanitized` clamps them,
+/// so the preview can never show a position that saving would refuse.
+///
+/// Sync rather than async: this runs on every step of a drag and only moves a
+/// window. Hopping onto the async pool per step would cost more than the work.
+#[tauri::command]
+pub fn preview_notch_placement(
+    app: AppHandle,
+    top_offset: i32,
+    horizontal_offset: i32,
+) -> Result<(), String> {
+    let Some(window) = notch::window(&app) else {
+        return Ok(());
+    };
+    notch::replace(
+        &window,
+        notch::Placement {
+            top_offset: top_offset.clamp(0, model::TOP_OFFSET_MAX),
+            horizontal_offset: horizontal_offset
+                .clamp(-model::HORIZONTAL_OFFSET_LIMIT, model::HORIZONTAL_OFFSET_LIMIT),
+        },
+    );
     Ok(())
 }
 
