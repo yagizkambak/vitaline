@@ -46,6 +46,15 @@ static HOT_ZONE: parking_lot::Mutex<Option<(f64, f64, f64, f64)>> = parking_lot:
 ///
 /// The panel's top edge is always the window's top edge (`.panel { top: 0 }`),
 /// so there's no `top` field.
+///
+/// Only `place_macos` reads these fields; the hover zone they describe exists
+/// for the cursor watcher, which is macOS-only (elsewhere the webview's own
+/// mouse events drive hover). Everywhere else the value is still carried
+/// around -- stored in `LAST_GEOMETRY`, handed back to `place` -- but never
+/// looked into, which is dead code as far as rustc is concerned. Gated rather
+/// than allowed outright so a field that stops being read on macOS too still
+/// gets reported.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HoverRect {
