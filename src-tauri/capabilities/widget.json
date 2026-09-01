@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "widget",
+  "description": "Move and resize permissions for the widget window only. The widget has no title bar, so its header has to start the OS drag itself and its corner grip the OS resize; both must be started from inside the mouse-down gesture, which is why the webview asks for them instead of Rust doing it. Kept out of the default capability so the notch and settings windows can't move themselves.",
+  "windows": ["widget"],
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging"
+  ]
+}

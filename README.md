@@ -1,14 +1,20 @@
 ![Vitaline](.github/assets/logo.png)
 
 A desktop app that shows CI pipeline status as a notch-style HUD at the top
-center of your screen. Watches **GitLab, GitHub Actions, and Azure DevOps**
-at the same time; runs from the same codebase on Windows and macOS.
+center of your screen — or as a **widget** you park anywhere and leave open.
+Watches **GitLab, GitHub Actions, and Azure DevOps** at the same time; runs
+from the same codebase on Windows and macOS.
 
-Collapsed, it's just a pill: a colored status dot, project counters, and the
-count of open merge requests. Hover over it and it opens downward, showing
-each watched project's latest pipeline, its stage breakdown, its jobs, and
-its open MRs; from there you can retry or cancel jobs, manually start a job,
-and read the log tail of a failed job.
+Collapsed, the notch is just a pill: a colored status dot, project counters,
+and the count of open merge requests. Hover over it and it opens downward,
+showing each watched project's latest pipeline, its stage breakdown, its
+jobs, and its open MRs; from there you can retry or cancel jobs, manually
+start a job, and read the log tail of a failed job.
+
+Prefer something that's simply always there? Switch to **widget mode** — the
+same data as one line per project, in a movable, resizable panel that can
+either float above your windows or sit behind them on the desktop. See
+[Widget mode](#widget-mode).
 
 When a **new merge request / PR opens** on a watched repo, you get a desktop
 notification, and the same announcement scrolls as **ticker text** inside the
@@ -39,6 +45,55 @@ in the pipeline's URL).
         └──────────────┘
 ```
 
+## Widget mode
+
+One surface is on screen at a time: the notch, or the widget. The widget is a
+borderless panel that shows one line per watched project — status dot, the
+stage that explains that status, a compact stage bar, how long ago the
+pipeline ran, and the open-MR count. Click a line and it expands in place to
+the same stage/job detail the notch panel has, with the same Retry / Cancel /
+Start / Log buttons.
+
+```
+┌ ⠿ ● Vitaline        4m ago    ⟳ ⚙ ✕ ┐
+│ ▸ ✓ web-app    build ▪▪▪▪  2d   ⇄ 2 │
+│ ▾ ● api        test  ▪▪▫▫  1m 4s    │
+│     ✓ lint             12s  Retry ↗ │
+│     ● test:unit      1m 4s  Cancel  │
+│     ▸ deploy        manual  Start   │
+│ ▸ ✗ mobile     lint  ▪▫▫▫  5d       │
+├─────────────────────────────────────┤
+│ Notch mode                  Quit  ◢ │
+└─────────────────────────────────────┘
+```
+
+**Switching**: the tray menu's **Widget mode** item, the **Widget** button in
+the notch panel, **Notch mode** in the widget's footer, or Settings →
+Display. All four write the same setting, so they stay in step with each
+other.
+
+**Moving and resizing**: drag the header to move it, the corner grip at the
+bottom right to resize it. Position and size are remembered in `config.json`
+(written 0.7s after you stop dragging, not on every frame). If the monitor a
+widget was parked on is gone at the next launch, it's placed at the top right
+of the primary screen instead of coming back off-screen.
+
+**Layer** (Settings → Display):
+
+- **Above other windows** — always visible, like the notch.
+- **On the desktop, behind other windows** — never covers what you're working
+  on; you see it when you see your desktop. This is `always_on_bottom`:
+  NSWindow level −1 on macOS, `HWND_BOTTOM` on Windows. Not literally the
+  wallpaper layer (desktop icons stay below it), but no app window ever ends
+  up underneath it.
+
+**Opacity** applies to the widget's background only — text and status colors
+stay fully opaque, so a see-through widget is still readable.
+
+Announcements (a new MR/PR, a pipeline that broke or recovered) show up as a
+strip above the footer instead of the notch's scrolling ticker; clicking it
+opens the MR in the browser. Desktop notifications are unaffected by the mode.
+
 ## Screenshots
 
 Taken from my own day-to-day watch list, as example data.
@@ -52,14 +107,22 @@ Taken from my own day-to-day watch list, as example data.
 
 - **Rust (`src-tauri/`)** — All HTTP traffic happens here. The webview never
   sees the token, and there's no CORS to deal with. A poll loop runs in the
-  background; the tray icon and notifications keep updating even while the
-  notch is hidden.
+  background; the tray icon and notifications keep updating even while every
+  window is hidden.
 - **React (`src/`)** — Display only. Listens for the `pipelines://updated`
   event Rust publishes, sends actions back via `invoke`.
-- **Window size** — The frontend measures the panel's real height and
-  reports it to Rust via `set_notch_size`; Rust resizes the window to that
-  size and re-centers it at the top of the screen. Opening/closing works
-  entirely through this one mechanism.
+- **Three windows, one snapshot** — `notch`, `widget` and `settings` are
+  separate webviews over the same Rust state; the snapshot event is broadcast
+  to all of them. The notch and the widget are never on screen together
+  (`displayMode`), but both stay loaded, which is what makes switching modes
+  instant.
+- **Window size** — The notch measures the panel's real height and reports it
+  to Rust via `set_notch_size`; Rust resizes the window to that size and
+  re-centers it at the top of the screen. Opening/closing works entirely
+  through this one mechanism. The widget is the other way around: the user
+  sizes the window and Rust records the result
+  ([`src-tauri/src/widget.rs`](src-tauri/src/widget.rs)), while the panel
+  simply fills whatever it's given.
 - **Tokens** — Stored in the OS keychain (macOS Keychain, Windows Credential
   Manager). Falls back to a file in the config directory if the keychain
   isn't reachable.
@@ -151,15 +214,18 @@ If the branch field is left empty, the project's most recent pipeline is watched
 
 | What | How |
 |---|---|
-| Open | Hover over the pill |
-| Keep it open | Click the pill (or "Pin") |
-| Hide | "Hide" in the panel, bring it back from the tray menu |
+| Open (notch) | Hover over the pill |
+| Keep it open (notch) | Click the pill (or "Pin") |
+| Open a project (widget) | Click its row; click again to collapse |
+| Switch surfaces | Tray → "Widget mode", the panel's "Widget" button, the widget's "Notch mode", or Settings → Display |
+| Move / resize (widget) | Drag the header; drag the corner grip |
+| Hide | "Hide" in the notch panel or ✕ in the widget; bring it back from the tray menu |
 | Filter by stage | Click a segment in the stage bar |
 | Job log | "Log" on the job row |
 | Open in GitLab | Click the project name or the ↗ icon on a job row |
-| See open MRs | "Merge request N" on the card |
+| See open MRs | "Merge request N" on the card / the ⇄ count on a widget row |
 
-In the tray menu: show/hide, refresh now, settings, quit.
+In the tray menu: show/hide, widget mode, refresh now, settings, quit.
 
 ## Platform notes
 
@@ -174,9 +240,14 @@ the menu bar.
 The packaged `.app` doesn't show a Dock icon (`Info.plist` → `LSUIElement`).
 The Dock icon does show up during `npm run app`; that's expected.
 
+The widget needs none of that machinery — it's an ordinary window, so there's
+no Objective-C in [`src-tauri/src/widget.rs`](src-tauri/src/widget.rs) at all.
+
 **Windows** — Since there's no physical notch, the panel just looks like a
 bar stuck to the top center of the screen. Bumping the "offset from the top
-edge" setting up a bit (e.g. 4-8 px) usually looks better.
+edge" setting up a bit (e.g. 4-8 px) usually looks better. Widget mode is a
+reasonable alternative here for exactly that reason: nothing about it assumes
+a notch.
 
 ## Troubleshooting
 
@@ -191,9 +262,11 @@ The same path is also shown at the bottom of the Settings window. If
 something goes wrong, check there first.
 
 Only a **single instance** of the app runs at a time; launching it a second
-time brings the existing notch to the front. To quit, use the **Quit** button
-in the notch panel or **Quit** in the tray menu — closing windows doesn't
-terminate the app, that's intentional.
+time brings the surface the current mode uses to the front. To quit, use the
+**Quit** button in the notch panel or the widget's footer, or **Quit** in the
+tray menu — closing windows doesn't terminate the app, that's intentional.
+(The widget has no title bar, so Cmd+W / Alt+F4 hides it rather than
+destroying it; the tray menu brings it back.)
 
 ## Known limits
 
@@ -210,6 +283,14 @@ terminate the app, that's intentional.
   come from a separate REST endpoint.
 - While the notch is open, the window grows, so the apps underneath can't be
   clicked in that area. While closed, it only takes up as much space as the pill.
+- The widget's "on the desktop" layer means "below every normal window", not
+  the wallpaper layer proper — it's a normal window that's been pushed to the
+  bottom of the stack, and desktop icons stay below it.
+- Only one widget window, showing every watched project. There's no way to
+  split projects across several widgets.
+- The widget doesn't queue announcements the way the notch's ticker does — a
+  new one replaces whatever was on the strip. The desktop notification is
+  still sent either way.
 
 ## Tests
 
@@ -218,7 +299,9 @@ cd src-tauri && cargo test
 ```
 
 There are unit tests for the status aggregation logic (`aggregate`), log
-tail truncation, and project path encoding.
+tail truncation, project path encoding, and config sanitizing — including
+that a config file written before widget mode existed still loads and keeps
+the notch.
 
 ## Contributing
 

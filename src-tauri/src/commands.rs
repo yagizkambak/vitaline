@@ -3,12 +3,17 @@
 //! All of them return the error as a `String`; on the JS side `errorText()`
 //! shows it directly.
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::model::{AppConfig, ProviderKind, Snapshot, TokenState, TokenStates};
+use crate::model::{AppConfig, DisplayMode, ProviderKind, Snapshot, TokenState, TokenStates};
 use crate::providers::{self, Client};
 use crate::state::AppState;
-use crate::{config, notch, refresh, secrets};
+use crate::{config, notch, refresh, secrets, widget};
+
+/// Emitted after the config changes, so surfaces that render FROM it (the
+/// widget's opacity, the settings window's mode radio) can follow along
+/// instead of only seeing the value they were opened with.
+pub const CONFIG_EVENT: &str = "config://updated";
 
 /// Writes the error to both the terminal and the frontend. While running
 /// `npm run app` we want a failed action to leave a trace in the terminal;
@@ -54,10 +59,13 @@ pub async fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig,
         clean.watched.len()
     ));
 
-    {
+    let previous_mode = {
         let state = app.state::<AppState>();
-        *state.config.write() = clean.clone();
-    }
+        let mut config = state.config.write();
+        let previous_mode = config.display_mode;
+        *config = clean.clone();
+        previous_mode
+    };
     config::save(&app, &clean).map_err(|e| fail("Settings could not be saved", e))?;
 
     // Window behavior depends on the settings; apply it right away.
@@ -69,6 +77,17 @@ pub async fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig,
         notch::replace(&window, clean.top_offset);
     }
 
+    // Only switch surfaces if the MODE itself changed. `apply_mode` reveals
+    // whichever surface is chosen, and saving unrelated settings must not do
+    // that: a notch the user had hidden would pop back open every time they
+    // pressed Save.
+    if previous_mode != clean.display_mode {
+        widget::apply_mode(&app);
+    } else {
+        widget::refresh_from_config(&app);
+    }
+
+    let _ = app.emit(CONFIG_EVENT, &clean);
     app.state::<AppState>().wake();
     crate::log::line("save_config finished");
     Ok(clean)
@@ -270,14 +289,56 @@ pub fn set_notch_size(
     #[cfg(not(target_os = "macos"))]
     {
         let state = app.state::<AppState>();
-        if !state
-            .notch_revealed
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        // In widget mode the notch webview still runs -- it stays loaded so
+        // switching back is instant -- and it still reports its size. That
+        // report must NOT be the thing that shows a window the user chose not
+        // to have on screen.
+        let wanted = state.config.read().display_mode == DisplayMode::Notch;
+        if wanted
+            && !state
+                .notch_revealed
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
             let _ = window.show();
         }
     }
     Ok(())
+}
+
+// ------------------------------------------------------------------ widget --
+
+/// Switches between the notch and the widget, and persists the choice.
+///
+/// MUST BE ASYNC, for the same reason `open_settings` is: switching to widget
+/// mode builds a window on first use, and a sync command blocks the main
+/// thread the webview needs to start on.
+#[tauri::command]
+pub async fn set_display_mode(app: AppHandle, mode: String) -> Result<(), String> {
+    let mode = DisplayMode::parse(&mode).ok_or_else(|| format!("Unknown display mode: {mode}"))?;
+
+    let changed = {
+        let state = app.state::<AppState>();
+        let mut config = state.config.write();
+        let changed = config.display_mode != mode;
+        config.display_mode = mode;
+        changed
+    };
+    if !changed {
+        return Ok(());
+    }
+
+    let config = app.state::<AppState>().config.read().clone();
+    config::save(&app, &config).map_err(|e| fail("Display mode could not be saved", e))?;
+    widget::apply_mode(&app);
+    let _ = app.emit(CONFIG_EVENT, config);
+    Ok(())
+}
+
+/// Hides the widget (its own Hide button) or brings it back (the tray menu).
+/// Async because showing it may have to create the window first.
+#[tauri::command]
+pub async fn set_widget_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    widget::set_visible(&app, visible).map_err(|e| fail("Widget could not be shown", e))
 }
 
 /// The screen's real notch dimensions. The frontend sizes the pill from

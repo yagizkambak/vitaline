@@ -126,6 +126,25 @@ pub fn watch_cursor(app: AppHandle) {
         loop {
             ticker.tick().await;
 
+            // In widget mode the notch is off screen. Its webview keeps
+            // running (so switching back is instant), so a hover event here
+            // would still open and resize a window nobody can see.
+            let notch_mode = app
+                .try_state::<crate::state::AppState>()
+                .map(|state| state.config.read().display_mode == crate::model::DisplayMode::Notch)
+                .unwrap_or(true);
+            if !notch_mode {
+                // Emit the leave we owe the frontend. Without it, a panel
+                // that was open at the moment the user switched to widget
+                // mode would still be open when they switch back -- there's
+                // no DOM mouseleave to close it (see the note above).
+                if was_inside {
+                    was_inside = false;
+                    let _ = app.emit(HOVER_EVENT, false);
+                }
+                continue;
+            }
+
             let Some(zone) = *HOT_ZONE.lock() else {
                 continue;
             };

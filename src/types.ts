@@ -33,6 +33,34 @@ export interface WatchedProject {
   label: string | null;
 }
 
+/** Which surface shows the status. Exactly one is on screen at a time. */
+export type DisplayMode = "notch" | "widget";
+
+/**
+ * Where the widget sits in the window stack. `front` is above everything,
+ * `desktop` is below every normal window — visible on the desktop, never in
+ * front of what you're working on.
+ */
+export type WidgetLayer = "front" | "desktop";
+
+export interface WidgetConfig {
+  /**
+   * Logical position of the window's top-left corner, or null until the
+   * widget has been placed once. Rust owns these — they're written when the
+   * user drags or resizes the window (see widget.rs `remember_geometry`).
+   */
+  x: number | null;
+  y: number | null;
+  width: number;
+  height: number;
+  layer: WidgetLayer;
+  /**
+   * Background opacity, 0.35..=1. Only the panel's background fades; text and
+   * status colors stay fully opaque, so a see-through widget stays readable.
+   */
+  opacity: number;
+}
+
 export interface AppConfig {
   /** e.g. https://gitlab.com or https://gitlab.company.com */
   gitlabUrl: string;
@@ -55,6 +83,9 @@ export interface AppConfig {
   notifyOnNewMergeRequest: boolean;
   /** Only notify about MRs opened against the project's watched branch. */
   notifyOnlyWatchedBranchMr: boolean;
+  /** Notch or widget; the other surface is hidden. */
+  displayMode: DisplayMode;
+  widget: WidgetConfig;
 }
 
 export interface JobInfo {

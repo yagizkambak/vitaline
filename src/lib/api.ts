@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppConfig,
+  DisplayMode,
   NotchMetrics,
   ProviderKind,
   Snapshot,
@@ -24,6 +25,14 @@ export const TICKER_EVENT = "notch://ticker";
  * the webview sees no movement at all and hovering over the notch did nothing.
  */
 export const HOVER_EVENT = "notch://hover";
+/**
+ * Emitted by Rust after the config changes, from wherever it changed — the
+ * settings window, the tray's "Widget mode" item, either surface's own mode
+ * button. Surfaces that render FROM the config (the widget's opacity, the
+ * settings window's mode radio) follow this instead of only seeing the value
+ * they were opened with.
+ */
+export const CONFIG_EVENT = "config://updated";
 
 export const getSnapshot = () => invoke<Snapshot>("get_snapshot");
 export const refreshNow = () => invoke<Snapshot>("refresh_now");
@@ -78,6 +87,14 @@ export const setNotchVisible = (visible: boolean) =>
 /** The screen's real notch dimensions; the pill is sized from these. */
 export const notchMetrics = () => invoke<NotchMetrics>("notch_metrics");
 
+/** Switches surfaces: hides the notch and opens the widget, or the reverse. */
+export const setDisplayMode = (mode: DisplayMode) =>
+  invoke<void>("set_display_mode", { mode });
+
+/** Hides the widget (its own Hide button) or brings it back (the tray menu). */
+export const setWidgetVisible = (visible: boolean) =>
+  invoke<void>("set_widget_visible", { visible });
+
 /** Hover state coming from Rust's cursor watcher. */
 export const onHover = (fn: (inside: boolean) => void): Promise<UnlistenFn> =>
   listen<boolean>(HOVER_EVENT, (event) => fn(event.payload));
@@ -110,6 +127,12 @@ export function onTicker(
   handler: (item: TickerItem) => void,
 ): Promise<UnlistenFn> {
   return listen<TickerItem>(TICKER_EVENT, (event) => handler(event.payload));
+}
+
+export function onConfig(
+  handler: (config: AppConfig) => void,
+): Promise<UnlistenFn> {
+  return listen<AppConfig>(CONFIG_EVENT, (event) => handler(event.payload));
 }
 
 /** Errors from Rust come back as strings; read them the same way everywhere. */

@@ -19,6 +19,7 @@ import {
   openExternal,
   openSettings,
   quitApp,
+  setDisplayMode,
   setNotchVisible,
 } from "./lib/api";
 import { statusTone, timeAgo } from "./lib/status";
@@ -570,6 +571,23 @@ export function Notch() {
               </button>
               <button type="button" onClick={() => setPinned((v) => !v)}>
                 {pinned ? "Release" : "Pin"}
+              </button>
+              {/* Switching surfaces from the panel itself: the tray menu and
+                  the settings window both have this too, but neither is where
+                  someone is looking when they decide the notch is in the way. */}
+              <button
+                type="button"
+                title="Show a free-floating widget instead of the notch"
+                onClick={() => {
+                  // Release the pin on the way out, or the notch would come
+                  // back fully open the next time it's shown -- the panel
+                  // unmounts nothing when it's hidden, so `pinned` would still
+                  // be true from this click's own session.
+                  setPinned(false);
+                  void setDisplayMode("widget");
+                }}
+              >
+                Widget
               </button>
               <button type="button" onClick={() => void openSettings()}>
                 Settings

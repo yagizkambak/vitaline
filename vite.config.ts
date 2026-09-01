@@ -19,6 +19,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         notch: here("./index.html"),
+        widget: here("./widget.html"),
         settings: here("./settings.html"),
       },
     },
