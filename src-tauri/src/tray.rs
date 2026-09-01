@@ -4,34 +4,53 @@
 //! status color. That way there's no need to ship a separate PNG per status,
 //! and the color looks the same on both platforms.
 
-use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter};
+use std::sync::OnceLock;
 
-use crate::model::{tone_of, Snapshot, Tone};
-use crate::notch;
+use tauri::image::Image;
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::model::{tone_of, DisplayMode, Snapshot, Tone};
+use crate::state::AppState;
+use crate::{notch, widget};
 
 pub const TRAY_ID: &str = "vitaline";
 pub const TOGGLE_EVENT: &str = "notch://toggle";
 
 const ICON_SIZE: usize = 32;
 
+/// The "Widget mode" item, kept so its checkmark can follow a mode change that
+/// happened somewhere else (the settings window, either surface's own button).
+/// muda flips the mark itself when the item is CLICKED; every other path has to
+/// come back through `sync_mode`.
+static MODE_ITEM: OnceLock<CheckMenuItem<tauri::Wry>> = OnceLock::new();
+
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let toggle = MenuItem::with_id(app, "toggle", "Show / hide notch", true, None::<&str>)?;
+    let on_widget = app.state::<AppState>().config.read().display_mode == DisplayMode::Widget;
+
+    // Deliberately not "Show / hide notch" any more: which surface this acts
+    // on depends on the mode, and naming one of them was misleading.
+    let toggle = MenuItem::with_id(app, "toggle", "Show / hide", true, None::<&str>)?;
+    let mode = CheckMenuItem::with_id(app, "mode", "Widget mode", true, on_widget, None::<&str>)?;
     let refresh = MenuItem::with_id(app, "refresh", "Refresh now", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&toggle, &refresh, &settings, &separator, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&toggle, &mode, &refresh, &settings, &separator, &quit],
+    )?;
+    let _ = MODE_ITEM.set(mode);
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(dot_icon(Tone::Idle))
         .tooltip("Vitaline")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "toggle" => toggle_notch(app),
+            "toggle" => toggle_surface(app),
+            "mode" => switch_mode(app),
             "refresh" => {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -52,6 +71,20 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Acts on whichever surface the current mode uses.
+fn toggle_surface(app: &AppHandle) {
+    // The mode is copied out in its OWN statement on purpose. Matching on
+    // `config.read()` directly keeps the read guard alive across the arms, and
+    // the widget path takes the same lock again further down -- a recursive
+    // read that deadlocks as soon as any thread is waiting to write. The same
+    // trap is documented at `notch::replace`.
+    let mode = app.state::<AppState>().config.read().display_mode;
+    match mode {
+        DisplayMode::Notch => toggle_notch(app),
+        DisplayMode::Widget => toggle_widget(app),
+    }
+}
+
 /// Shows the notch if it's hidden; tells the frontend to "open then close" if it's visible.
 fn toggle_notch(app: &AppHandle) {
     let Some(window) = notch::window(app) else {
@@ -65,6 +98,49 @@ fn toggle_notch(app: &AppHandle) {
             // Plain show() isn't enough: it drops out of the notch space while hidden.
             notch::reveal(app);
         }
+    }
+}
+
+/// Plain show/hide -- the widget has no collapsed state to toggle into.
+fn toggle_widget(app: &AppHandle) {
+    let visible = widget::window(app)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false);
+    if let Err(err) = widget::set_visible(app, !visible) {
+        crate::log::line(&format!("tray: widget could not be toggled: {err}"));
+    }
+}
+
+/// Flips the mode from the tray. muda has already flipped the item's checkmark
+/// by the time this runs, so the mark is re-set from the value that was
+/// actually persisted -- a failed save leaves the menu honest.
+fn switch_mode(app: &AppHandle) {
+    let current = app.state::<AppState>().config.read().display_mode;
+    let next = match current {
+        DisplayMode::Notch => DisplayMode::Widget,
+        DisplayMode::Widget => DisplayMode::Notch,
+    };
+
+    {
+        let state = app.state::<AppState>();
+        state.config.write().display_mode = next;
+    }
+    let config = app.state::<AppState>().config.read().clone();
+    if let Err(err) = crate::config::save(app, &config) {
+        crate::log::line(&format!("tray: display mode could not be saved: {err}"));
+    }
+
+    // Emitted for the settings window, whose mode radio would otherwise show
+    // a value that's no longer true.
+    let _ = app.emit(crate::commands::CONFIG_EVENT, config);
+    widget::apply_mode(app);
+}
+
+/// Puts the tray's checkmark back in step with the config. Called from
+/// `widget::apply_mode`, which every mode change funnels through.
+pub fn sync_mode(mode: DisplayMode) {
+    if let Some(item) = MODE_ITEM.get() {
+        let _ = item.set_checked(mode == DisplayMode::Widget);
     }
 }
 

@@ -12,9 +12,11 @@ mod refresh;
 mod secrets;
 mod state;
 mod tray;
+mod widget;
 
 use tauri::Manager;
 
+use crate::model::DisplayMode;
 use crate::state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -27,9 +29,19 @@ pub fn run() {
         // leave the other running, and the app would look like it hadn't
         // quit at all.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            log::line("second instance blocked, bringing the existing notch to front");
-            notch::reveal(app);
-            if let Some(window) = notch::window(app) {
+            log::line("second instance blocked, bringing the existing surface to front");
+            // Whichever surface is the active one -- launching the app a
+            // second time in widget mode used to reveal the notch on top of
+            // the widget, leaving both on screen.
+            widget::apply_mode(app);
+            // Copied out first, not matched on the guard -- see the note in
+            // `tray::toggle_surface`.
+            let mode = app.state::<AppState>().config.read().display_mode;
+            let window = match mode {
+                DisplayMode::Notch => notch::window(app),
+                DisplayMode::Widget => widget::window(app),
+            };
+            if let Some(window) = window {
                 let _ = window.set_focus();
             }
         }))
@@ -51,6 +63,8 @@ pub fn run() {
             commands::set_notch_size,
             commands::set_notch_visible,
             commands::notch_metrics,
+            commands::set_display_mode,
+            commands::set_widget_visible,
             commands::open_settings,
             commands::open_external,
             commands::quit_app,
@@ -76,6 +90,7 @@ pub fn run() {
             let show_on_all_spaces = config.show_on_all_spaces;
             let top_offset = config.top_offset;
             let start_collapsed = config.start_collapsed;
+            let display_mode = config.display_mode;
 
             app.manage(AppState::new(config, tokens));
 
@@ -99,8 +114,25 @@ pub fn run() {
                 // window permanently blank; there, first visibility is given
                 // when `set_notch_size` is called, in commands.rs (see
                 // AppState::notch_revealed).
+                //
+                // In widget mode the window is still built, placed and
+                // configured -- just never shown. Keeping its webview loaded
+                // is what makes switching modes instant, and it costs nothing
+                // on screen.
                 #[cfg(target_os = "macos")]
-                let _ = window.show();
+                if display_mode == DisplayMode::Notch {
+                    let _ = window.show();
+                }
+            }
+
+            // The widget is created on demand, so in notch mode the window
+            // never exists at all. `apply_mode` is deliberately NOT used
+            // here: it would reveal the notch through `notch::reveal`, and on
+            // Windows that show() has to wait for the webview (see above).
+            if display_mode == DisplayMode::Widget {
+                if let Err(err) = widget::ensure(&handle) {
+                    log::line(&format!("widget: startup failed: {err}"));
+                }
             }
 
             // Hover is driven from here rather than the webview's own mouse

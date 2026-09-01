@@ -608,22 +608,26 @@ body {
    WKWebView are Chromium/WebKit under the hood, so -webkit-scrollbar works
    on both; thin + transparent track + a line-colored thumb reads as part of
    the panel instead of a system control bolted onto it. */
-.body::-webkit-scrollbar {
+.body::-webkit-scrollbar,
+.widget__list::-webkit-scrollbar {
   width: 8px;
 }
 
-.body::-webkit-scrollbar-track {
+.body::-webkit-scrollbar-track,
+.widget__list::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.body::-webkit-scrollbar-thumb {
+.body::-webkit-scrollbar-thumb,
+.widget__list::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
-.body::-webkit-scrollbar-thumb:hover {
+.body::-webkit-scrollbar-thumb:hover,
+.widget__list::-webkit-scrollbar-thumb:hover {
   background: var(--fg-faint);
   background-clip: padding-box;
 }
@@ -702,6 +706,432 @@ body {
 .cards {
   display: flex;
   flex-direction: column;
+}
+
+/* --------------------------------------------------------------- widget --- */
+
+/* Like the notch window, the widget window is transparent: only `.widget`
+   paints. That's what the rounded corners need — without it they'd be cut out
+   of a black rectangle. */
+.widget-body {
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+  height: 100vh;
+}
+
+.widget-body #root {
+  height: 100%;
+}
+
+/**
+ * The widget fills its window, and the WINDOW is what gets resized (by Rust,
+ * from the user's drag — see widget.rs). So unlike `.panel`, nothing here
+ * measures or animates its own size: `height: 100%` and the header/list/footer
+ * rows do all the layout.
+ *
+ * `--widget-opacity` comes from the config. It's applied to the BACKGROUND
+ * only, not as `opacity` on the element: fading the whole widget would take
+ * the text and the status colors with it, and a status color you have to
+ * squint at defeats the point of the thing.
+ */
+.widget {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: color-mix(
+    in srgb,
+    var(--bg) calc(var(--widget-opacity, 0.94) * 100%),
+    transparent
+  );
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  /* INSET on purpose. The panel fills its window exactly, so an outer shadow
+     would be clipped at the frame and never seen; the window's own platform
+     shadow does that job (`.shadow(true)` in widget.rs). This is just the
+     top-edge highlight that keeps the panel from looking painted-on. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* The title bar the window doesn't have: this strip starts the OS window drag
+   (`startDragging` in Widget.tsx). Buttons inside it are excluded there. */
+.widget__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 7px 9px 7px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+}
+
+.widget__head:active {
+  cursor: grabbing;
+}
+
+/* Drawn, not typed. This started as a `⠿` (Braille) glyph and rendered as
+   nothing at all -- Braille patterns aren't in every UI font, and the fallback
+   on Windows would be a tofu box. A dot grid in CSS depends on no font. */
+.widget__handle {
+  flex: none;
+  width: 7px;
+  height: 11px;
+  background-image: radial-gradient(
+    circle at center,
+    var(--fg-faint) 0.9px,
+    transparent 1.1px
+  );
+  background-size: 3.5px 3.5px;
+  opacity: 0.75;
+}
+
+.widget__title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.widget__when {
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget__tools {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  cursor: default;
+}
+
+/**
+ * The shared `.icon-btn` is sized for the settings window's dense table rows:
+ * an 11px glyph (from the global `button` rule) in text-shaped padding. In the
+ * widget's header those three symbols are the only controls on the strip and
+ * they were unreadable, so here they get a square hit area and a glyph big
+ * enough to tell ⟳ / ⚙ / ✕ apart at a glance.
+ */
+.widget__tools .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 23px;
+  padding: 0;
+  font-size: 13.5px;
+  line-height: 1;
+  color: var(--fg-dim);
+}
+
+.widget__tools .icon-btn:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+/**
+ * `.linkish` resets `font: inherit` — which includes font-SIZE — and it is
+ * defined further down this file than the widget section. Same specificity, so
+ * source order wins and every linkish button in here jumped back to the body's
+ * 16px: the footer's "Notch mode" and "Quit" rendered LARGER than the widget's
+ * own title. Scoping by ancestor outranks it, and inheriting is what these
+ * buttons should do anyway — each one then takes the size of the strip it sits
+ * in (footer 10.5px, banner 11px, row meta 10.5px).
+ */
+.widget .linkish {
+  font-size: inherit;
+}
+
+.widget > .banner {
+  margin: 8px 10px 0;
+  padding: 7px 9px;
+  font-size: 11px;
+}
+
+.widget__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.widget__empty {
+  padding: 16px 12px;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ widget row --- */
+
+.wrow {
+  border-bottom: 1px solid var(--line);
+}
+
+.wrow:last-child {
+  border-bottom: none;
+}
+
+.wrow.is-busy {
+  opacity: 0.5;
+}
+
+/* The whole collapsed line is one button, so the global button styling has to
+   be undone here rather than fought with. */
+.wrow__line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wrow__line:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+/* A project with no pipeline and no MRs has nothing to open. It's still a
+   real row, so it keeps full contrast — the global disabled dimming would
+   read as "this project is broken". */
+.wrow__line:disabled {
+  opacity: 1;
+}
+
+.wrow__caret {
+  flex: none;
+  width: 8px;
+  font-size: 9px;
+  color: var(--fg-faint);
+}
+
+.wrow__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 550;
+}
+
+.wrow__stage {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.wrow__stage--empty {
+  color: var(--fg-faint);
+}
+
+.wrow__error {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--bad) 70%, var(--fg));
+}
+
+/* Fixed width: the bar is a glance-level progress strip, and letting it grow
+   with the stage count would make the same pipeline look different from one
+   poll to the next. */
+.wrow__bar {
+  flex: none;
+  width: 52px;
+}
+
+.wrow__when {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.wrow__mrs {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.wrow__detail {
+  padding: 0 10px 10px;
+  animation: cardIn 180ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
+}
+
+.wrow__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
+
+.wrow__pipeline {
+  color: var(--fg-dim);
+}
+
+.wrow__branch,
+.wrow__sha {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wrow__branch {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.wrow__state {
+  margin-left: auto;
+}
+
+.wrow__commit {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wrow__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.wrow__jobs {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.wrow__empty {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+/* The job and merge-request rows are shared with the notch, where they get a
+   700px panel. Here they have a third of that, so they're tightened and
+   allowed to wrap instead of pushing their action buttons out of view. */
+.wrow__jobs .job {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.wrow__jobs .job__actions {
+  margin-left: auto;
+}
+
+.wrow__jobs .job button,
+.wrow__jobs .mr button {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.wrow__jobs .mr {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.wrow__jobs .mr__branch {
+  max-width: 100%;
+}
+
+.wrow__jobs .trace__body {
+  max-height: 180px;
+}
+
+/* --------------------------------------------------- widget ticker/footer --- */
+
+/* Announcements: the widget's equivalent of the strip that opens under the
+   notch. It doesn't scroll — there's no notch to work around here, so the text
+   is simply clipped and the tooltip carries the rest. */
+.widget__ticker {
+  flex: none;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 5px 10px;
+  background: color-mix(in srgb, var(--bg-soft) 75%, transparent);
+  font-size: 11px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: bodyIn 320ms ease-out;
+}
+
+/* The font-size lives on the strip, not on the buttons: they inherit it (see
+   `.widget .linkish` above). */
+.widget__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 5px 8px 6px 10px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+}
+
+.widget__mode {
+  color: var(--fg-dim);
+}
+
+.widget__quit {
+  margin-left: auto;
+  color: var(--fg-faint);
+}
+
+.widget__quit:hover {
+  color: var(--bad);
+}
+
+/* A borderless window has no resize edges, so the corner has to be drawn and
+   handed to the OS by hand (`startResizeDragging` in Widget.tsx). */
+.widget__resize {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  margin-left: 2px;
+  border-right: 2px solid var(--fg-faint);
+  border-bottom: 2px solid var(--fg-faint);
+  border-bottom-right-radius: 4px;
+  opacity: 0.45;
+  cursor: nwse-resize;
+}
+
+.widget__resize:hover {
+  opacity: 0.9;
 }
 
 /* ----------------------------------------------------------------- dots --- */
@@ -784,7 +1214,9 @@ body {
   .card__jobs,
   .trace,
   .pill--flash,
-  .pill__counts b {
+  .pill__counts b,
+  .wrow__detail,
+  .widget__ticker {
     animation: none !important;
   }
   .dot--busy,
@@ -967,6 +1399,21 @@ body {
 
 .stagebar__seg.is-active {
   outline: 1px solid var(--fg-dim);
+}
+
+/* Segments only, no labels: the widget's collapsed rows (see the `compact`
+   prop in StageBar.tsx). The whole bar is ~52px wide there, which is not
+   enough for a stage name but plenty for the shape of a pipeline. */
+.stagebar--compact {
+  gap: 2px;
+  margin-top: 0;
+}
+
+.stagebar--compact .stagebar__seg {
+  height: 6px;
+  padding: 0;
+  border-radius: 3px;
+  cursor: inherit;
 }
 
 .stagebar__seg--ok {
@@ -1384,6 +1831,24 @@ button.primary {
 
 .settings label.inline input {
   width: 100px;
+}
+
+/* The 100px above is meant for number fields; a slider needs room to be worth
+   dragging. */
+.settings label.inline input[type="range"] {
+  width: 200px;
+}
+
+/* Sub-options of a radio/checkbox above them (the widget's layer and opacity
+   under "Widget"), indented so the grouping is visible without a fieldset. */
+.settings .sub {
+  margin-left: 22px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.settings .sub[data-disabled="true"] {
+  opacity: 0.5;
 }
 
 .settings label.check {

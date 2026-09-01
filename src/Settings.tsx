@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useTauriEvent } from "./hooks/useTauriEvent";
 import {
   clearToken,
   errorText,
   getConfig,
   getTokenStates,
   logPath,
+  onConfig,
   saveConfig,
   setToken,
 } from "./lib/api";
@@ -121,6 +123,20 @@ export function Settings() {
       .then(setLogFile)
       .catch(() => setLogFile(null));
   }, []);
+
+  /**
+   * The mode can also be switched from the tray or from either surface while
+   * this window is open. Only `displayMode` is taken from the event on
+   * purpose: adopting the whole config would throw away whatever the user has
+   * typed here but not saved yet.
+   */
+  useTauriEvent(onConfig, (incoming: AppConfig) =>
+    setConfig((cur) =>
+      cur && cur.displayMode !== incoming.displayMode
+        ? { ...cur, displayMode: incoming.displayMode }
+        : cur,
+    ),
+  );
 
   if (!config) {
     return (
@@ -402,6 +418,95 @@ export function Settings() {
       </section>
 
       <section>
+        <h2>Display</h2>
+        <p className="hint">
+          Only one of these is on screen at a time. The tray menu's{" "}
+          <strong>Widget mode</strong> item switches between them too, as do the{" "}
+          <strong>Widget</strong> button in the notch panel and{" "}
+          <strong>Notch mode</strong> in the widget's footer.
+        </p>
+        <label className="check">
+          <input
+            type="radio"
+            name="display-mode"
+            checked={config.displayMode === "notch"}
+            onChange={() => patch({ displayMode: "notch" })}
+          />
+          <span>
+            <strong>Notch</strong> — a pill at the top center of the screen
+            that opens on hover
+          </span>
+        </label>
+        <label className="check">
+          <input
+            type="radio"
+            name="display-mode"
+            checked={config.displayMode === "widget"}
+            onChange={() => patch({ displayMode: "widget" })}
+          />
+          <span>
+            <strong>Widget</strong> — a panel you place anywhere and leave
+            open; drag its header to move it, its bottom-right corner to
+            resize it
+          </span>
+        </label>
+
+        <div className="sub" data-disabled={config.displayMode !== "widget"}>
+          <label className="check">
+            <input
+              type="radio"
+              name="widget-layer"
+              disabled={config.displayMode !== "widget"}
+              checked={config.widget.layer === "front"}
+              onChange={() =>
+                patch({ widget: { ...config.widget, layer: "front" } })
+              }
+            />
+            <span>Keep the widget above other windows</span>
+          </label>
+          <label className="check">
+            <input
+              type="radio"
+              name="widget-layer"
+              disabled={config.displayMode !== "widget"}
+              checked={config.widget.layer === "desktop"}
+              onChange={() =>
+                patch({ widget: { ...config.widget, layer: "desktop" } })
+              }
+            />
+            <span>
+              Keep it on the desktop, behind other windows (it never covers
+              what you're working on — and is only in view when the desktop is)
+            </span>
+          </label>
+          <label className="inline">
+            <span>Widget background opacity</span>
+            <input
+              type="range"
+              min={35}
+              max={100}
+              step={1}
+              disabled={config.displayMode !== "widget"}
+              value={Math.round(config.widget.opacity * 100)}
+              onChange={(e) =>
+                patch({
+                  widget: {
+                    ...config.widget,
+                    opacity: Number(e.target.value) / 100,
+                  },
+                })
+              }
+            />
+            <span>{Math.round(config.widget.opacity * 100)}%</span>
+            <small>
+              Only the background fades; the text and status colors stay fully
+              opaque. Applies as soon as you save.
+            </small>
+          </label>
+        </div>
+      </section>
+
+      <section>
         <h2>Behavior</h2>
         <label className="inline">
           <span>Refresh interval (seconds)</span>
@@ -414,7 +519,7 @@ export function Settings() {
           />
         </label>
         <label className="inline">
-          <span>Offset from the top edge (px)</span>
+          <span>Offset from the top edge (px, notch only)</span>
           <input
             type="number"
             min={0}
