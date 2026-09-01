@@ -182,6 +182,8 @@ pub fn watch_cursor(app: AppHandle) {
 /// `hover` is the panel's visible rectangle inside the window; it defines the
 /// cursor watcher's target zone on macOS. `None` means "the whole window",
 /// which is only right before the frontend has reported a real panel size.
+// See `metrics` for why the `return` inside the macOS block stays.
+#[allow(clippy::needless_return)]
 pub fn place(
     window: &WebviewWindow,
     width: u32,
@@ -416,6 +418,16 @@ impl Default for NotchMetrics {
 }
 
 /// Reads the primary screen's notch dimensions. Always returns the default outside macOS.
+// There's no `else` for `#[cfg]`, so a function that does one thing on macOS
+// and another everywhere else is written as two blocks, and the first one ends
+// in `return`. On macOS the second block is compiled out, which is why clippy
+// sees a `return` as the last thing in the function and calls it needless --
+// it is right about that, and it would still be right if the two blocks ever
+// drifted apart. The `return` stays because it is what makes "the macOS path
+// ends here" true no matter what gets added after these blocks later, and
+// because reshaping macOS-only control flow is not something the Windows side
+// of this project can compile, let alone test.
+#[allow(clippy::needless_return)]
 pub fn metrics(window: &WebviewWindow) -> NotchMetrics {
     #[cfg(target_os = "macos")]
     {
@@ -689,6 +701,8 @@ mod cgs {
 /// in the dedicated notch space half-finished, so when it's shown again it's
 /// visible but doesn't receive mouse events ("doesn't expand after
 /// show/hide"). We explicitly leave the space before hiding.
+// See `metrics` for why the `return` inside the macOS block stays.
+#[allow(clippy::needless_return)]
 pub fn conceal(app: &AppHandle) {
     let Some(window) = window(app) else {
         return;
