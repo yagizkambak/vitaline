@@ -69,6 +69,7 @@ export interface AppConfig {
   /** https://dev.azure.com/organization — required if Azure is used. */
   azureOrgUrl: string;
   watched: WatchedProject[];
+  /** How often the providers are polled. Clamped to 15..3600 by Rust. */
   pollSeconds: number;
   notifyOnFailure: boolean;
   notifyOnRecovery: boolean;

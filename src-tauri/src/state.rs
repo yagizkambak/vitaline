@@ -63,8 +63,17 @@ impl AppState {
         }
     }
 
+    /// Clamped again here rather than trusted from the config: this is the
+    /// value that actually decides how hard the providers get hit, and it is
+    /// read straight off the live config, which a `set_display_mode` or a
+    /// tray toggle can write without going through `sanitized`.
     pub fn poll_interval(&self) -> Duration {
-        Duration::from_secs(self.config.read().poll_seconds.clamp(5, 3600))
+        Duration::from_secs(
+            self.config
+                .read()
+                .poll_seconds
+                .clamp(crate::model::MIN_POLL_SECONDS, crate::model::MAX_POLL_SECONDS),
+        )
     }
 
     /// Re-run the poll loop immediately.
